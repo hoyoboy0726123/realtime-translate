@@ -123,6 +123,25 @@ uv pip install "git+https://github.com/facebookresearch/seamless_communication.g
 - 安裝後到後台把引擎切換為「地端」，並可調整音訊區塊大小與 `decision_threshold`
   以權衡延遲與品質。
 
+### 為什麼 Mac 上地端引擎不能用容器
+
+地端 SeamlessStreaming 要靠硬體加速才能達到「即時逐字」。在 MacBook Pro（Apple
+Silicon）上，加速來自 **MPS（Apple Metal）**，而 Docker Desktop 在 macOS 是把
+Linux 容器跑在一個輕量虛擬機裡 —— **那個虛擬機無法存取 Mac 的 GPU / MPS**。因此
+即使把地端引擎放進容器，PyTorch 也只能退回 CPU，SeamlessStreaming 會慢到失去即時
+意義。
+
+結論與建議組合：
+
+| 情境                         | 建議做法                                              |
+| ---------------------------- | ----------------------------------------------------- |
+| 雲端 / 示範引擎               | 直接用 Docker（方式三）最省事                         |
+| 在 Mac 上使用地端引擎         | 後端**原生執行**（方式一或方式二），不要放進容器      |
+| Linux 主機 + NVIDIA GPU       | 可在容器內用地端引擎，須加 `--gpus all` 並裝 NVIDIA Container Toolkit |
+
+也就是說，「容器不能跑地端引擎」這句話只對 **Mac** 成立；在有 NVIDIA 顯卡的 Linux
+主機上，容器是可以把 GPU 通進去的。你使用的是 Mac，所以實務上：要地端翻譯就原生跑後端。
+
 ---
 
 ## 使用方式

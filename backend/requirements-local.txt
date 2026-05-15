@@ -1,0 +1,9 @@
+# Extra dependencies for the on-device "local" engine (Meta Seamless).
+# Install only when you want to run translation locally on your MacBook:
+#   pip install -r requirements-local.txt
+#
+# torch ships with Apple Silicon (MPS) support out of the box on macOS.
+torch>=2.2
+torchaudio>=2.2
+transformers>=4.44
+sentencepiece>=0.2

@@ -1,0 +1,31 @@
+[project]
+name = "realtime-translate-backend"
+version = "1.0.0"
+description = "FastAPI backend for the real-time bilingual translation app"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "websockets>=13.0",
+    "python-dotenv>=1.0",
+    "pydantic>=2.7",
+    "numpy>=1.26",
+]
+
+# Dependencies for the on-device SeamlessStreaming engine.
+# Enable with:  uv sync --extra local
+# Note: seamless_communication is not on PyPI — after syncing, also run:
+#   uv pip install "git+https://github.com/facebookresearch/seamless_communication.git"
+[project.optional-dependencies]
+local = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "sentencepiece>=0.2",
+    "fairseq2>=0.2",
+    "simuleval>=1.1",
+]
+
+[tool.uv]
+# This is a runnable app, not a distributable library — uv manages the
+# environment but does not build/install the project itself.
+package = false

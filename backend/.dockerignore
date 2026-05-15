@@ -1,0 +1,8 @@
+.venv/
+data/
+.env
+__pycache__/
+*.pyc
+pyproject.toml
+uv.lock
+requirements-local.txt

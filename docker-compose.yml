@@ -1,0 +1,27 @@
+# Run the whole stack with: docker compose up --build
+# Then open http://localhost:3000
+#
+# Values are read from a .env file in this directory (see .env.example).
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_REALTIME_MODEL=${OPENAI_REALTIME_MODEL:-gpt-realtime-translate}
+      - CORS_ORIGINS=http://localhost:3000
+    volumes:
+      # Persist settings.json and the SQLite transcript database.
+      - ./backend/data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser-reachable address of the backend.
+        NEXT_PUBLIC_API_BASE: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

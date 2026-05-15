@@ -24,9 +24,17 @@ class CloudSettings(BaseModel):
 
 
 class LocalSettings(BaseModel):
-    # transformers id for Seamless; the SeamlessStreaming agent uses its own checkpoint name.
-    model: str = "facebook/seamless-m4t-v2-large"
-    device: str = "mps"  # mps on Apple Silicon, else cpu / cuda
+    """On-device SeamlessStreaming (simultaneous, word-by-word) engine."""
+
+    device: str = "mps"                     # mps on Apple Silicon, else cpu / cuda
+    # Audio block size fed to the streaming policy, in milliseconds. Smaller =
+    # lower latency / more compute.
+    source_segment_size_ms: int = 320
+    # EMMA monotonic-attention threshold: lower emits words sooner (lower
+    # latency), higher waits for more context (higher quality).
+    decision_threshold: float = 0.5
+    unity_model: str = "seamless_streaming_unity"
+    monotonic_decoder_model: str = "seamless_streaming_monotonic_decoder"
 
 
 class Settings(BaseModel):

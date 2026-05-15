@@ -13,7 +13,7 @@ import {
 
 const ENGINE_LABEL: Record<string, string> = {
   cloud: "雲端 — OpenAI Realtime (gpt-realtime-translate)",
-  local: "地端 — Meta Seamless (on-device)",
+  local: "地端 — Meta SeamlessStreaming（逐字即時翻譯）",
   mock: "示範 — 免金鑰／免模型，重播範例對話",
 };
 
@@ -141,16 +141,6 @@ export default function SettingsPage() {
         <div className="card">
           <div className="field-row">
             <div className="field">
-              <label>Seamless 模型</label>
-              <input
-                type="text"
-                value={settings.local.model}
-                onChange={(e) =>
-                  update({ local: { ...settings.local, model: e.target.value } })
-                }
-              />
-            </div>
-            <div className="field">
               <label>運算裝置</label>
               <select
                 value={settings.local.device}
@@ -163,9 +153,47 @@ export default function SettingsPage() {
                 <option value="cuda">cuda</option>
               </select>
             </div>
+            <div className="field">
+              <label>音訊區塊大小（毫秒）</label>
+              <input
+                type="number"
+                min={160}
+                max={1000}
+                step={80}
+                value={settings.local.source_segment_size_ms}
+                onChange={(e) =>
+                  update({
+                    local: {
+                      ...settings.local,
+                      source_segment_size_ms: Number(e.target.value),
+                    },
+                  })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>輸出門檻 decision_threshold</label>
+              <input
+                type="number"
+                min={0.1}
+                max={0.9}
+                step={0.05}
+                value={settings.local.decision_threshold}
+                onChange={(e) =>
+                  update({
+                    local: {
+                      ...settings.local,
+                      decision_threshold: Number(e.target.value),
+                    },
+                  })
+                }
+              />
+            </div>
           </div>
           <p className="sub" style={{ marginBottom: 0 }}>
-            首次使用會自動下載模型權重，請先安裝 <code>requirements-local.txt</code>。
+            使用 Meta SeamlessStreaming 逐字同步翻譯。區塊越小、門檻越低，字詞出現越快（延遲越低）；
+            數值越大則翻譯越準。首次使用會自動下載模型權重，請先安裝{" "}
+            <code>requirements-local.txt</code> 並 git 安裝 <code>seamless_communication</code>。
           </p>
         </div>
       )}

@@ -1,9 +1,26 @@
-# Extra dependencies for the on-device "local" engine (Meta Seamless).
-# Install only when you want to run translation locally on your MacBook:
-#   pip install -r requirements-local.txt
+# Dependencies for the on-device "local" engine — Meta SeamlessStreaming
+# (true simultaneous, word-by-word speech translation).
 #
-# torch ships with Apple Silicon (MPS) support out of the box on macOS.
+# SeamlessStreaming runs on Meta's fairseq2 + simuleval streaming stack.
+# Install in two steps:
+#
+#   pip install -r requirements-local.txt
+#   pip install git+https://github.com/facebookresearch/seamless_communication.git
+#
+# (seamless_communication is not published on PyPI, hence the git install.)
+#
+# Apple Silicon (MacBook Pro M-series) notes:
+#   - fairseq2 ships macOS arm64 wheels; set device="mps" in the admin page
+#     for acceleration, or "cpu" if an op is unsupported.
+#   - The first run downloads the SeamlessStreaming checkpoints
+#     (seamless_streaming_unity ~2 GB + seamless_streaming_monotonic_decoder).
+#   - Two pipelines run concurrently (one per locked language); 24 GB RAM is
+#     comfortable. Tune source_segment_size_ms / decision_threshold in the
+#     admin page to trade latency against quality.
+
 torch>=2.2
 torchaudio>=2.2
-transformers>=4.44
 sentencepiece>=0.2
+numpy>=1.26
+fairseq2>=0.2
+simuleval>=1.1

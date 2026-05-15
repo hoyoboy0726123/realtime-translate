@@ -15,7 +15,13 @@ export interface Settings {
   lang_a: string;
   lang_b: string;
   cloud: { model: string };
-  local: { model: string; device: string };
+  local: {
+    device: string;
+    source_segment_size_ms: number;
+    decision_threshold: number;
+    unity_model: string;
+    monotonic_decoder_model: string;
+  };
 }
 
 export interface SessionSummary {

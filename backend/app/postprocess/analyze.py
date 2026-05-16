@@ -33,6 +33,7 @@ def analyze_session(session_id: str) -> None:
 
     try:
         # 1. diarize + transcribe (full large-v3 — offline, accuracy over speed)
+        db.set_process_status(session_id, "diarizing")
         utterances = diarize_and_transcribe(
             session["audio_path"], local.analyze_whisper_model,
         )
@@ -42,6 +43,7 @@ def analyze_session(session_id: str) -> None:
             return
 
         # 2. translate into both locked languages
+        db.set_process_status(session_id, "translating")
         diarized = translate_utterances(
             utterances, lang_a, lang_b,
             local.translate_model, settings.chinese_variant,
@@ -49,6 +51,7 @@ def analyze_session(session_id: str) -> None:
         db.save_diarized(session_id, diarized)
 
         # 3. summarize — feed the lang_a column to the LLM
+        db.set_process_status(session_id, "summarizing")
         summary = summarize(diarized, "text_a", local.summary_model)
         if settings.chinese_variant == "traditional" and "zh" in (lang_a, lang_b):
             import opencc

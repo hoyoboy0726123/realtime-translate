@@ -196,5 +196,7 @@ def reset_stuck_processing() -> None:
     """On startup, mark any analysis left mid-run (server restarted) as failed."""
     with _lock, _connect() as conn:
         conn.execute(
-            "UPDATE sessions SET process_status = 'failed' WHERE process_status = 'processing'"
+            "UPDATE sessions SET process_status = 'failed' "
+            "WHERE process_status IN "
+            "('processing', 'diarizing', 'translating', 'summarizing')"
         )

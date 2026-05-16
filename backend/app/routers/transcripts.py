@@ -1,4 +1,4 @@
-"""Transcript history API: browse, analyse, export and delete recorded sessions."""
+"""Transcript history API: browse, analyse, play, export and delete sessions."""
 from __future__ import annotations
 
 import asyncio
@@ -6,12 +6,15 @@ import datetime as dt
 import os
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import db
 from ..postprocess.analyze import analyze_session
 
 router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
+
+# process_status values that mean analysis is still running.
+_PROCESSING = {"processing", "diarizing", "translating", "summarizing"}
 
 
 def _fmt_ts(ms: int) -> str:
@@ -32,12 +35,24 @@ async def get_transcript(session_id: str) -> dict:
     return session
 
 
+@router.get("/{session_id}/audio")
+async def get_audio(session_id: str):
+    """Stream the session's recorded audio (for the in-browser player)."""
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    audio_path = session.get("audio_path")
+    if not audio_path or not os.path.exists(audio_path):
+        raise HTTPException(404, "No recording for this session")
+    return FileResponse(audio_path, media_type="audio/wav")
+
+
 @router.post("/{session_id}/analyze")
 async def analyze(session_id: str) -> dict:
     """Start post-session analysis (diarization + translation + summary).
 
-    Runs in the background; poll GET /{session_id} for `process_status` and the
-    resulting `diarized` transcript / `summary`.
+    Runs in the background; poll GET /{session_id} for `process_status` —
+    `diarizing` -> `translating` -> `summarizing` -> `done` (or `failed`).
     """
     session = await asyncio.to_thread(db.get_session, session_id)
     if session is None:
@@ -45,13 +60,13 @@ async def analyze(session_id: str) -> dict:
     audio_path = session.get("audio_path")
     if not audio_path or not os.path.exists(audio_path):
         raise HTTPException(400, "No recording available for this session")
-    if session.get("process_status") == "processing":
-        return {"status": "processing"}
+    if session.get("process_status") in _PROCESSING:
+        return {"status": session["process_status"]}
 
-    await asyncio.to_thread(db.set_process_status, session_id, "processing")
+    await asyncio.to_thread(db.set_process_status, session_id, "diarizing")
     # Run the (long, compute-bound) pipeline in a worker thread, fire-and-forget.
     asyncio.create_task(asyncio.to_thread(analyze_session, session_id))
-    return {"status": "processing"}
+    return {"status": "diarizing"}
 
 
 @router.get("/{session_id}/export.md", response_class=PlainTextResponse)
@@ -89,5 +104,12 @@ async def export_json(session_id: str) -> dict:
 
 @router.delete("/{session_id}")
 async def delete_transcript(session_id: str) -> dict:
+    """Delete a session, its segments, and its recording file."""
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session and session.get("audio_path"):
+        try:
+            os.remove(session["audio_path"])
+        except OSError:
+            pass  # already gone — fine
     await asyncio.to_thread(db.delete_session, session_id)
     return {"deleted": session_id}

@@ -57,12 +57,54 @@ The local engine and recording analysis use a **dual backend**, auto-detected:
 > cleanly produce fully symmetric bidirectional subtitles — use the local
 > engine for that.
 
+### Requirements
+
+**Software versions — read this before installing.**
+
+| Component      | Version            | Notes                                                                                                          |
+| -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Python         | **3.10 or 3.11**   | **Do NOT use 3.12+** — the local engine's `torch 2.2` has no 3.12 wheels. Create the virtualenv with **Python 3.11**. |
+| Node.js        | **20 or newer**    | frontend build / dev server                                                                                    |
+| `torch`        | pinned **2.2.x**   | do not bump — `transformers 4.44` and NLLB depend on it                                                        |
+| `transformers` | pinned **4.44.x**  | do not bump — newer releases require torch ≥ 2.4                                                               |
+
+The version pins are deliberate and the `requirements*.txt` files already
+enforce them — the one thing you must get right yourself is creating the
+virtualenv with **Python 3.11**.
+
+**Recommended hardware.** The `cloud` and `mock` engines run on almost anything;
+the **local engine** is the demanding part (Whisper + NLLB + a 7B LLM).
+Reference machine, verified: **MacBook Pro M4 Pro · 12-core · 24 GB RAM**.
+
+*macOS — Apple Silicon*
+
+| Use case                 | Minimum                        | Recommended                                            |
+| ------------------------ | ------------------------------ | ------------------------------------------------------ |
+| cloud / mock only        | any Mac · 8 GB RAM             | —                                                      |
+| local engine + analysis  | Apple Silicon (M1) · 16 GB RAM | **Apple Silicon Pro/Max · 24 GB RAM** (M4 Pro — the reference machine) |
+| free disk space          | ~20 GB (models + recordings)   | —                                                      |
+
+*Windows / Linux*
+
+| Use case                  | Minimum                                          | Recommended                                         |
+| ------------------------- | ------------------------------------------------ | --------------------------------------------------- |
+| cloud / mock only         | any modern PC · 8 GB RAM                         | —                                                   |
+| local engine — CPU only   | 4-core CPU · 16 GB RAM (live subtitles will lag) | —                                                   |
+| local engine — NVIDIA GPU | GPU 6 GB VRAM · 16 GB RAM                        | **NVIDIA GPU ≥ 8 GB VRAM · 8-core CPU · 32 GB RAM**  |
+| free disk space           | ~20 GB (models + recordings)                     | —                                                   |
+
+On Windows / Linux an **NVIDIA GPU is strongly recommended** for the local
+engine — CPU-only works but live translation may not keep up with real time.
+
 ### Install & run
 
-Requirements: **Python 3.10+** (use **3.11** for the local engine — torch 2.2
-has no 3.12 wheels), **Node.js 20+**. Backend runs on `:8000`, frontend on
-`:3000`. Pick one of the three methods below — they install the `cloud` and
-`mock` engines. For the `local` engine see [Local engine](#local-engine).
+Backend runs on `:8000`, frontend on `:3000`. The three methods below each
+install the `cloud` and `mock` engines; the `local` engine is added separately
+(see [Local engine](#local-engine)):
+
+- **Method 1 — pip + venv** — standard setup, most control.
+- **Method 2 — uv** — fastest dependency install.
+- **Method 3 — Docker** — one command, no local Python / Node setup; **Windows / Linux only** (`cloud` + `mock`).
 
 #### Method 1 — native (pip + venv)
 
@@ -99,13 +141,18 @@ npm run dev
 
 #### Method 3 — Docker
 
+> **Recommended for Windows / Linux only.** On macOS use Method 1 or 2 instead —
+> Docker Desktop on a Mac runs a CPU-only Linux VM with no access to Apple
+> Silicon acceleration, so a Mac gains nothing from the container and loses the
+> native local engine.
+
 ```bash
 cp .env.example .env          # fill in OPENAI_API_KEY for the cloud engine
 docker compose up --build
 ```
 
-The image covers the `cloud` and `mock` engines. The `local` engine needs
-hardware acceleration — run the backend natively (method 1 or 2) for it.
+The image covers the `cloud` and `mock` engines only. The `local` engine needs
+hardware acceleration — on **any** OS it must be run natively (Method 1 or 2).
 
 ### Local engine
 
@@ -258,11 +305,52 @@ realtime-translate/
 > 雲端引擎適合作為「**以中文為主**」的設定。OpenAI 翻譯 API 是連續單向口譯模型，
 > 無法做到乾淨的對稱雙向字幕 —— 需要完整雙向請用地端引擎。
 
+### 系統需求
+
+**軟體版本 —— 安裝前請務必先看。**
+
+| 元件           | 版本               | 說明                                                                                       |
+| -------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| Python         | **3.10 或 3.11**   | **請勿用 3.12 以上** —— 地端引擎的 `torch 2.2` 沒有 3.12 的 wheel。建立虛擬環境請用 **Python 3.11**。 |
+| Node.js        | **20 以上**        | 前端建置 / 開發伺服器                                                                      |
+| `torch`        | 鎖定 **2.2.x**     | 請勿升級 —— `transformers 4.44` 與 NLLB 依賴它                                              |
+| `transformers` | 鎖定 **4.44.x**    | 請勿升級 —— 更新版需要 torch ≥ 2.4                                                          |
+
+版本鎖定是刻意的，`requirements*.txt` 已經寫死；你唯一要自己確保的，是用
+**Python 3.11** 建立虛擬環境。
+
+**建議硬體規格。** `cloud` 與 `mock` 引擎幾乎什麼機器都能跑；**地端引擎**才是吃資源的
+部分（要同時跑 Whisper + NLLB + 7B LLM）。實測基準機：
+**MacBook Pro M4 Pro · 12 核 · 24 GB RAM**。
+
+*macOS — Apple Silicon*
+
+| 使用情境              | 最低                            | 建議                                              |
+| --------------------- | ------------------------------- | ------------------------------------------------- |
+| 只用 cloud / mock     | 任何 Mac · 8 GB RAM             | —                                                 |
+| 地端引擎 + 錄音分析   | Apple Silicon（M1）· 16 GB RAM  | **Apple Silicon Pro/Max · 24 GB RAM**（M4 Pro，即基準機） |
+| 可用磁碟空間          | 約 20 GB（模型 + 錄音）         | —                                                 |
+
+*Windows / Linux*
+
+| 使用情境                | 最低                                       | 建議                                              |
+| ----------------------- | ------------------------------------------ | ------------------------------------------------- |
+| 只用 cloud / mock       | 任何近代 PC · 8 GB RAM                     | —                                                 |
+| 地端引擎 — 純 CPU       | 4 核 CPU · 16 GB RAM（即時字幕會延遲）     | —                                                 |
+| 地端引擎 — NVIDIA GPU   | GPU 6 GB VRAM · 16 GB RAM                  | **NVIDIA GPU ≥ 8 GB VRAM · 8 核 CPU · 32 GB RAM** |
+| 可用磁碟空間            | 約 20 GB（模型 + 錄音）                    | —                                                 |
+
+Windows / Linux 上**強烈建議用 NVIDIA GPU** 跑地端引擎 —— 純 CPU 雖然能跑，但
+即時翻譯可能跟不上實際語速。
+
 ### 安裝與啟動
 
-需求：**Python 3.10+**（地端引擎請用 **3.11**，torch 2.2 沒有 3.12 的 wheel）、
-**Node.js 20+**。後端跑在 `:8000`、前端跑在 `:3000`。下列三種方式擇一 —— 它們會
-安裝 `cloud` 與 `mock` 引擎；`local` 引擎見[地端引擎](#地端引擎)。
+後端跑在 `:8000`、前端跑在 `:3000`。下列三種方式都會安裝 `cloud` 與 `mock`
+引擎；`local` 引擎另外安裝（見[地端引擎](#地端引擎)）：
+
+- **方式一 — pip + venv** —— 標準安裝，最可控。
+- **方式二 — uv** —— 依賴安裝最快。
+- **方式三 — Docker** —— 一行指令，免裝 Python / Node；**僅限 Windows / Linux**（`cloud` + `mock`）。
 
 #### 方式一：原生安裝（pip + venv）
 
@@ -299,13 +387,17 @@ npm run dev
 
 #### 方式三：Docker
 
+> **僅建議在 Windows / Linux 使用。** macOS 請改用方式一或方式二 —— Docker
+> Desktop 在 Mac 上是跑一個純 CPU 的 Linux 虛擬機，無法存取 Apple Silicon
+> 加速，Mac 用容器不但沒有好處，還會失去原生地端引擎。
+
 ```bash
 cp .env.example .env          # 使用 cloud 引擎時填入 OPENAI_API_KEY
 docker compose up --build
 ```
 
-容器映像涵蓋 `cloud` 與 `mock` 引擎。`local` 引擎需要硬體加速，請以方式一或方式二
-原生執行後端。
+容器映像僅涵蓋 `cloud` 與 `mock` 引擎。`local` 引擎需要硬體加速，**任何作業系統**
+都必須以方式一或方式二原生執行。
 
 ### 地端引擎
 

@@ -111,23 +111,33 @@ class WhisperEngine(TranslationEngine):
         result = asr.transcribe(samples, self._whisper_model, language=lang_hint)
         return result["text"], result["language"]
 
-    def _resolve_spoken(self, detected: str) -> str:
-        """Map Whisper's detected language onto 'a' or 'b' of the locked pair."""
-        if detected == self.lang_b:
-            return "b"
-        # Default to lang_a — one of the pair must be it, and lang_a is the
-        # most likely when detection is ambiguous.
-        return "a"
+    def _nllb_code(self, iso: str) -> str:
+        """FLORES-200 code for a Whisper-detected ISO language code; fall back
+        to lang_a's code if the language is outside the supported set."""
+        try:
+            return languages.get(iso)["nllb"]
+        except KeyError:
+            return self._nllb_a
 
     def _emit(self, kind: str, seg_id: str, text: str, detected: str) -> None:
-        """Transcript is `text` in language `detected`; translate to the other."""
-        spoken = self._resolve_spoken(detected)
-        if spoken == "a":
+        """Emit one event. The panes are *forced* to the locked languages —
+        text_a is always lang_a, text_b is always lang_b — no matter what
+        language Whisper detected. A third language (often unclear speech
+        mis-detected as e.g. Japanese/Korean) is translated into both, so a
+        pane can never display an unexpected language."""
+        if detected == self.lang_a:
             text_a = text
             text_b = self._translator.translate(text, self._nllb_a, self._nllb_b)
-        else:
+            spoken = "a"
+        elif detected == self.lang_b:
             text_b = text
             text_a = self._translator.translate(text, self._nllb_b, self._nllb_a)
+            spoken = "b"
+        else:
+            src = self._nllb_code(detected)
+            text_a = self._translator.translate(text, src, self._nllb_a)
+            text_b = self._translator.translate(text, src, self._nllb_b)
+            spoken = None
         if not text_a and not text_b:
             return
         # Apply the configured Chinese script variant to whichever pane is zh.

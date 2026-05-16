@@ -86,15 +86,23 @@ Reference machine, verified: **MacBook Pro M4 Pro · 12-core · 24 GB RAM**.
 
 *Windows / Linux*
 
-| Use case                  | Minimum                                          | Recommended                                         |
-| ------------------------- | ------------------------------------------------ | --------------------------------------------------- |
-| cloud / mock only         | any modern PC · 8 GB RAM                         | —                                                   |
-| local engine — CPU only   | 4-core CPU · 16 GB RAM (live subtitles will lag) | —                                                   |
-| local engine — NVIDIA GPU | GPU 6 GB VRAM · 16 GB RAM                        | **NVIDIA GPU ≥ 8 GB VRAM · 8-core CPU · 32 GB RAM**  |
-| free disk space           | ~20 GB (models + recordings)                     | —                                                   |
+| Use case            | Minimum                                              | Recommended                                                    |
+| ------------------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+| cloud / mock only   | any modern PC · 8 GB RAM                             | —                                                              |
+| local engine        | **NVIDIA GPU 6 GB VRAM** · 8-core CPU · 16 GB RAM    | **NVIDIA GPU ≥ 8 GB VRAM** · 8-core CPU · 32 GB RAM            |
+| free disk space     | ~20 GB (models + recordings)                         | —                                                              |
 
-On Windows / Linux an **NVIDIA GPU is strongly recommended** for the local
-engine — CPU-only works but live translation may not keep up with real time.
+**On Windows / Linux the local engine effectively requires an NVIDIA GPU.**
+CPU-only does technically run, but live subtitles fall badly behind real time —
+it is only acceptable for the offline *recording analysis* feature, not for
+live translation. Plan for a GPU.
+
+- **GPU** — any NVIDIA card from the GTX 10-series onward works with CUDA 12.4.
+  VRAM is what matters (Whisper + a 7B LLM): **6 GB minimum** (e.g. RTX 2060,
+  RTX 3050), **8 GB+ recommended** (e.g. RTX 3060 / 4060 or better).
+- **CPU** — any modern x86-64 chip (Intel Core or AMD Ryzen from the last
+  ~5 years); NLLB translation and audio VAD run on the CPU. There is no special
+  model requirement — an 8-core CPU is comfortable.
 
 ### Install & run
 
@@ -177,9 +185,24 @@ cd backend
 pip install -r requirements-local-windows.txt  # or: uv sync --extra local-win
 ```
 
-*NVIDIA GPU (recommended)* — **use CUDA 12.4**. This is the one version that
-satisfies both GPU components. **CUDA 11.x and CUDA 12.0–12.2 do NOT work**
-(CTranslate2 4.x needs CUDA ≥ 12.3 with cuDNN 9).
+*NVIDIA GPU (recommended)* — **CUDA 12.4 is the recommended version.**
+
+Which CUDA versions work:
+
+| CUDA version    | Status                                                            |
+| --------------- | ----------------------------------------------------------------- |
+| 11.x            | ❌ not supported — CTranslate2 4.x cannot use CUDA 11              |
+| 12.0 – 12.2     | ❌ too old — CTranslate2 4.7 needs cuDNN 9, which needs CUDA ≥ 12.3 |
+| **12.4**        | ✅ recommended — clean match for both GPU components               |
+| 12.3, 12.5–12.x | ✅ also fine — see note below                                      |
+
+If you have CUDA **12.0–12.2 or 11.x**, install CUDA Toolkit 12.4 alongside it
+(multiple CUDA versions can coexist) — you do not have to remove the old one.
+If you have CUDA **12.5 or newer**, that is fine: CTranslate2 only needs
+≥ 12.3, and thanks to CUDA's minor-version compatibility the `cu124`
+llama-cpp-python wheel still runs on a 12.5 / 12.6 / 12.8 driver — keep using
+the `cu124` wheel shown below. In short: **use the `cu124` wheel on any CUDA
+12.3+ system; only 11.x and 12.0–12.2 actually need an upgrade.**
 
 1. Install **CUDA Toolkit 12.4** and **cuDNN 9** — put cuDNN's `bin` folder on
    the system `PATH` (CTranslate2 fails to find the GPU if the cuDNN 9 DLLs
@@ -359,15 +382,21 @@ realtime-translate/
 
 *Windows / Linux*
 
-| 使用情境                | 最低                                       | 建議                                              |
-| ----------------------- | ------------------------------------------ | ------------------------------------------------- |
-| 只用 cloud / mock       | 任何近代 PC · 8 GB RAM                     | —                                                 |
-| 地端引擎 — 純 CPU       | 4 核 CPU · 16 GB RAM（即時字幕會延遲）     | —                                                 |
-| 地端引擎 — NVIDIA GPU   | GPU 6 GB VRAM · 16 GB RAM                  | **NVIDIA GPU ≥ 8 GB VRAM · 8 核 CPU · 32 GB RAM** |
-| 可用磁碟空間            | 約 20 GB（模型 + 錄音）                    | —                                                 |
+| 使用情境          | 最低                                           | 建議                                              |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------- |
+| 只用 cloud / mock | 任何近代 PC · 8 GB RAM                         | —                                                 |
+| 地端引擎          | **NVIDIA GPU 6 GB VRAM** · 8 核 CPU · 16 GB RAM | **NVIDIA GPU ≥ 8 GB VRAM** · 8 核 CPU · 32 GB RAM |
+| 可用磁碟空間      | 約 20 GB（模型 + 錄音）                        | —                                                 |
 
-Windows / Linux 上**強烈建議用 NVIDIA GPU** 跑地端引擎 —— 純 CPU 雖然能跑，但
-即時翻譯可能跟不上實際語速。
+**Windows / Linux 的地端引擎實質上需要 NVIDIA GPU。** 純 CPU 雖然能跑，但即時
+字幕會嚴重落後語速 —— 只勉強適用於離線的「錄音分析」功能，不適合即時翻譯。請直接
+以 GPU 規劃。
+
+- **GPU** —— GTX 10 系列以後的 NVIDIA 顯卡都支援 CUDA 12.4。重點是 VRAM
+  （要跑 Whisper + 7B LLM）：**最低 6 GB**（如 RTX 2060、RTX 3050）、
+  **建議 8 GB 以上**（如 RTX 3060 / 4060 或更高階）。
+- **CPU** —— 任何近 5 年的 x86-64 處理器（Intel Core 或 AMD Ryzen）即可；
+  NLLB 翻譯與音訊 VAD 跑在 CPU 上。沒有特定型號要求，8 核較為充裕。
 
 ### 安裝與啟動
 
@@ -447,8 +476,22 @@ cd backend
 pip install -r requirements-local-windows.txt  # 或： uv sync --extra local-win
 ```
 
-*NVIDIA GPU（建議）* —— **請用 CUDA 12.4**，這是唯一同時滿足兩個 GPU 元件的版本。
-**CUDA 11.x 與 CUDA 12.0–12.2 都不行**（CTranslate2 4.x 需要 CUDA ≥ 12.3 + cuDNN 9）。
+*NVIDIA GPU（建議）* —— **建議用 CUDA 12.4。**
+
+各 CUDA 版本的支援情況：
+
+| CUDA 版本       | 狀態                                                          |
+| --------------- | ------------------------------------------------------------- |
+| 11.x            | ❌ 不支援 —— CTranslate2 4.x 無法使用 CUDA 11                  |
+| 12.0 – 12.2     | ❌ 太舊 —— CTranslate2 4.7 需要 cuDNN 9，而 cuDNN 9 需 CUDA ≥ 12.3 |
+| **12.4**        | ✅ 建議 —— 兩個 GPU 元件都乾淨相容                              |
+| 12.3、12.5 以上 | ✅ 也可以 —— 見下方說明                                        |
+
+如果你現在是 CUDA **12.0–12.2 或 11.x**，另外裝一個 CUDA Toolkit 12.4 即可
+（多個 CUDA 版本可以並存，不必移除舊的）。如果是 CUDA **12.5 以上**也沒問題：
+CTranslate2 只要求 ≥ 12.3，而靠 CUDA 的次版本相容性，`cu124` 的 llama-cpp-python
+輪一樣能在 12.5 / 12.6 / 12.8 的驅動上執行 —— 維持用下方的 `cu124` 輪即可。
+簡單說：**只要是 CUDA 12.3 以上，都用 `cu124` 輪；只有 11.x 與 12.0–12.2 真的需要升級。**
 
 1. 安裝 **CUDA Toolkit 12.4** 與 **cuDNN 9** —— 把 cuDNN 的 `bin` 資料夾加進系統
    `PATH`（cuDNN 9 的 DLL 不在 `PATH` 上時，CTranslate2 會找不到 GPU）。

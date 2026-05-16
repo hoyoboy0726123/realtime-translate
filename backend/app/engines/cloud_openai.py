@@ -1,23 +1,18 @@
-"""Cloud engine backed by the OpenAI Realtime Translation API (gpt-realtime-translate).
+"""Cloud engine — OpenAI Realtime Translation API + local NLLB for the reverse
+direction.
 
-The translation API is one-directional per session: each session has a single
-target output language.  To always show *both* languages regardless of which one
-is spoken, we open **two parallel sessions**:
+The translation API is one-directional per session, and running two sessions
+desyncs badly. So instead we run **one** OpenAI session (target = lang_b) and
+fill the other direction with the local NLLB translator:
 
-  Session A  →  target = lang_a  (e.g. Chinese)
-  Session B  →  target = lang_b  (e.g. English)
+  * spoken == lang_a  -> OpenAI returns the lang_a transcript *and* the lang_b
+    translation; both panes come from the one session, perfectly in sync.
+  * spoken == lang_b  -> OpenAI's output is a passthrough; the lang_a pane is
+    produced by translating the lang_b transcript with NLLB.
 
-The same microphone audio is sent to both.  When the speaker uses Chinese,
-Session B produces the English translation while Session A passes through the
-Chinese transcript.  When the speaker switches to English, Session A produces
-the Chinese translation while Session B passes through.
-
-Session A's output goes to the top pane (lang_a), Session B's to the bottom
-pane (lang_b).  This works well as a Chinese-primary setup: speaking Chinese
-gives live bilingual subtitles; speaking English shows the Chinese translation
-up top while the English pane may pause.  (The translation API emits no turn
-boundary events and offers no clean way to segment a single mic into both
-directions — for fully symmetric bilingual subtitles use the on-device engine.)
+This is a Chinese-primary setup: the main direction (lang_a -> lang_b) uses
+OpenAI; the occasional reverse direction uses NLLB. If NLLB is not installed
+the reverse direction is just left blank (graceful degradation).
 
 Audio must be 24 kHz PCM16 mono.  The frontend sends 16 kHz, so we resample.
 """
@@ -38,6 +33,10 @@ from .base import TranslationEngine, TranslationEvent, new_segment_id
 
 TRANSLATION_URL = "wss://api.openai.com/v1/realtime/translations?model={model}"
 OPENAI_SAMPLE_RATE = 24_000
+TRANSCRIBE_MODEL = "gpt-realtime-whisper"
+
+# How often the reverse-direction (lang_b -> lang_a) NLLB translation refreshes.
+_NLLB_TICK = 1.2
 
 
 def _resample_16k_to_24k(pcm16_bytes: bytes) -> bytes:
@@ -62,72 +61,161 @@ async def _connect(url: str, headers: dict):
         return await websockets.connect(url, extra_headers=headers, max_size=None)
 
 
-class _Session:
-    """One WebSocket session targeting a single output language."""
-
-    def __init__(self, label: str):
-        self.label = label          # "a" or "b", for logging
-        self.ws = None
-        self.reader: asyncio.Task | None = None
-        self.input_buf: str = ""    # input_transcript (source language)
-        self.output_buf: str = ""   # output_transcript (target language)
-        self.turn_done: bool = False
-
-    @property
-    def text(self) -> str:
-        """Best available text: translation if present, else passthrough transcript."""
-        return (self.output_buf or self.input_buf).strip()
-
-    async def open(self, url: str, headers: dict, tgt_code: str) -> None:
-        self.ws = await _connect(url, headers)
-        await self.ws.send(json.dumps({
-            "type": "session.update",
-            "session": {
-                "audio": {
-                    "input": {
-                        # gpt-realtime-whisper is the transcription model the
-                        # translation endpoint expects; without a valid one the
-                        # source-language `input_transcript` is never emitted.
-                        "transcription": {"model": "gpt-realtime-whisper"},
-                    },
-                    "output": {
-                        "language": tgt_code,
-                    },
-                },
-            },
-        }))
-
-    async def send_audio(self, pcm24_b64: str) -> None:
-        if not self.ws:
-            return
-        await self.ws.send(json.dumps({
-            "type": "session.input_audio_buffer.append",
-            "audio": pcm24_b64,
-        }))
-
-    async def close(self) -> None:
-        if self.reader:
-            self.reader.cancel()
-            try:
-                await self.reader
-            except asyncio.CancelledError:
-                pass
-        if self.ws:
-            await self.ws.close()
-            self.ws = None
-
-
 class CloudEngine(TranslationEngine):
     name = "cloud"
 
     def __init__(self, lang_a, lang_b, out_queue, settings):
         super().__init__(lang_a, lang_b, out_queue, settings)
-        self._sess_a = _Session("a")  # target = lang_a
-        self._sess_b = _Session("b")  # target = lang_b
-        self._seg_id: str = new_segment_id()
-        # OpenCC converter for Simplified -> Traditional, built in open().
+        self._code_a = languages.get(lang_a)["code"]
+        self._code_b = languages.get(lang_b)["code"]
+        self._target = self._code_b          # OpenAI translates into lang_b
+        self._nllb_a = languages.get(lang_a)["nllb"]
+        self._nllb_b = languages.get(lang_b)["nllb"]
+
+        self._ws = None
+        self._reader: asyncio.Task | None = None
+        self._nllb_task: asyncio.Task | None = None
+        self._build_task: asyncio.Task | None = None
+
+        self._seg_id = new_segment_id()
+        self._input_buf = ""    # transcript of whatever language was spoken
+        self._output_buf = ""   # OpenAI translation, in lang_b
+
+        # Reverse direction (lang_b spoken -> lang_a pane), via local NLLB.
+        self._translator = None     # NllbTranslator once loaded, else None
+        self._rev_src = ""          # input_buf snapshot last sent to NLLB
+        self._rev_out = ""          # NLLB result, in lang_a
+
+        # OpenCC converter for Simplified -> Traditional Chinese.
         self._zh_variant = settings.chinese_variant
         self._cc = None
+
+    # ---- lifecycle ----------------------------------------------------------
+
+    async def open(self) -> None:
+        key = openai_api_key()
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the cloud engine.")
+
+        if self._zh_variant == "traditional" and "zh" in (self.lang_a, self.lang_b):
+            import opencc
+            self._cc = opencc.OpenCC("s2twp")
+
+        url = TRANSLATION_URL.format(model=self.settings.cloud.model)
+        headers = {"Authorization": f"Bearer {key}"}
+        self._ws = await _connect(url, headers)
+        await self._ws.send(json.dumps({
+            "type": "session.update",
+            "session": {
+                "audio": {
+                    "input": {"transcription": {"model": TRANSCRIBE_MODEL}},
+                    "output": {"language": self._target},
+                },
+            },
+        }))
+        self._reader = asyncio.create_task(self._read_loop())
+        self._nllb_task = asyncio.create_task(self._nllb_loop())
+        # Load NLLB in the background so the session starts without waiting on it.
+        self._build_task = asyncio.create_task(self._build_nllb())
+
+    async def _build_nllb(self) -> None:
+        """Load the NLLB translator for the reverse direction (best-effort)."""
+        try:
+            from ..nllb import NllbTranslator
+            translator = NllbTranslator(self.settings.local.translate_model)
+            await asyncio.to_thread(translator.build)
+            self._translator = translator
+            logging.info("[cloud] NLLB ready — reverse direction enabled")
+        except Exception as exc:  # noqa: BLE001
+            logging.warning(
+                f"[cloud] NLLB unavailable — reverse direction disabled: {exc}"
+            )
+
+    async def send_audio(self, pcm16: bytes) -> None:
+        if not self._ws:
+            return
+        pcm24 = _resample_16k_to_24k(pcm16)
+        if not pcm24:
+            return
+        try:
+            await self._ws.send(json.dumps({
+                "type": "session.input_audio_buffer.append",
+                "audio": base64.b64encode(pcm24).decode("ascii"),
+            }))
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def close(self) -> None:
+        for task in (self._build_task, self._nllb_task, self._reader):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        if self._ws:
+            await self._ws.close()
+            self._ws = None
+
+    # ---- OpenAI session reader ---------------------------------------------
+
+    async def _read_loop(self) -> None:
+        assert self._ws is not None
+        try:
+            async for raw in self._ws:
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                await self._handle(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logging.error(f"[cloud] read loop error: {exc}")
+
+    async def _handle(self, event: dict) -> None:
+        etype = event.get("type", "")
+
+        if etype == "session.input_transcript.delta":
+            self._input_buf += event.get("delta", "")
+            await self._emit_partial()
+
+        elif etype == "session.output_transcript.delta":
+            self._output_buf += event.get("delta", "")
+            await self._emit_partial()
+
+        elif etype == "error":
+            detail = event.get("error", {}).get("message", "unknown error")
+            logging.error(f"[cloud] error: {detail}")
+            await self.out_queue.put(TranslationEvent(
+                kind="final", segment_id=new_segment_id(),
+                lang_a=self.lang_a, lang_b=self.lang_b,
+                text_a=f"[engine error] {detail}", text_b="",
+            ))
+
+    # ---- reverse-direction NLLB translation --------------------------------
+
+    async def _nllb_loop(self) -> None:
+        """Keep the lang_a pane updated (via NLLB) while lang_b is being spoken."""
+        try:
+            while True:
+                await asyncio.sleep(_NLLB_TICK)
+                if self._translator is None:
+                    continue
+                if guess_spoken(self._input_buf, self.lang_a, self.lang_b) != "b":
+                    continue
+                src = self._input_buf.strip()
+                if not src or src == self._rev_src:
+                    continue
+                self._rev_src = src
+                self._rev_out = await asyncio.to_thread(
+                    self._translator.translate, src, self._nllb_b, self._nllb_a,
+                )
+                await self._emit_partial()
+        except asyncio.CancelledError:
+            pass
+
+    # ---- emit ---------------------------------------------------------------
 
     def _zh(self, text: str, lang: str) -> str:
         """Convert a Chinese pane's text to the configured script variant."""
@@ -135,139 +223,25 @@ class CloudEngine(TranslationEngine):
             return self._cc.convert(text)
         return text
 
-    async def open(self) -> None:
-        key = openai_api_key()
-        if not key:
-            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the cloud engine.")
+    def _panes(self) -> tuple[str, str, str | None]:
+        """(text_a, text_b, spoken).
 
-        # The translation API emits Simplified Chinese; convert to Traditional
-        # (Taiwan, with phrase conversion) when requested.
-        if self._zh_variant == "traditional" and "zh" in (self.lang_a, self.lang_b):
-            import opencc
-            self._cc = opencc.OpenCC("s2twp")
-
-        model = self.settings.cloud.model
-        url = TRANSLATION_URL.format(model=model)
-        headers = {"Authorization": f"Bearer {key}"}
-
-        code_a = languages.get(self.lang_a)["code"]
-        code_b = languages.get(self.lang_b)["code"]
-
-        # Open both sessions in parallel.
-        await asyncio.gather(
-            self._sess_a.open(url, headers, code_a),
-            self._sess_b.open(url, headers, code_b),
-        )
-
-        self._sess_a.reader = asyncio.create_task(self._read_loop(self._sess_a))
-        self._sess_b.reader = asyncio.create_task(self._read_loop(self._sess_b))
-
-    async def send_audio(self, pcm16: bytes) -> None:
-        pcm24 = _resample_16k_to_24k(pcm16)
-        if not pcm24:
-            return
-        b64 = base64.b64encode(pcm24).decode("ascii")
-        # Feed the same audio to both sessions.
-        await asyncio.gather(
-            self._sess_a.send_audio(b64),
-            self._sess_b.send_audio(b64),
-        )
-
-    async def close(self) -> None:
-        await asyncio.gather(
-            self._sess_a.close(),
-            self._sess_b.close(),
-        )
-
-    # ---- reader loops -------------------------------------------------------
-
-    async def _read_loop(self, sess: _Session) -> None:
-        assert sess.ws is not None
-        try:
-            async for raw in sess.ws:
-                try:
-                    event = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                await self._handle(sess, event)
-        except Exception as exc:
-            logging.error(f"[cloud-{sess.label}] _read_loop error: {exc}")
-
-    async def _handle(self, sess: _Session, event: dict) -> None:
-        etype = event.get("type", "")
-
-        if etype == "session.input_transcript.delta":
-            sess.input_buf += event.get("delta", "")
-            await self._emit_partial()
-
-        elif etype == "session.output_transcript.delta":
-            sess.output_buf += event.get("delta", "")
-            await self._emit_partial()
-
-        elif etype == "session.turn.done":
-            sess.turn_done = True
-            # Only finalize when both sessions have finished the turn.
-            if self._sess_a.turn_done and self._sess_b.turn_done:
-                await self._emit_final()
-
-        elif etype == "error":
-            detail = event.get("error", {}).get("message", "unknown error")
-            logging.error(f"[cloud-{sess.label}] error: {detail}")
-            await self.out_queue.put(TranslationEvent(
-                kind="final", segment_id=new_segment_id(),
-                lang_a=self.lang_a, lang_b=self.lang_b,
-                text_a=f"[engine error] {detail}", text_b="",
-            ))
-
-    def _panes(self) -> tuple[str, str]:
-        """Return (text_a, text_b).
-
-        Only the session that is actually *translating* (its target language
-        differs from what was spoken) reliably emits transcripts — it carries
-        both the source `input_transcript` and the translated `output_transcript`.
-        The other session is doing a passthrough (target == spoken language) and
-        the API emits it unreliably, so we never depend on it: both panes are
-        taken from the one translating session.
+        spoken == lang_a : OpenAI translated lang_a -> lang_b (both panes synced).
+        spoken == lang_b : lang_b pane is the transcript; lang_a pane is NLLB.
         """
-        a, b = self._sess_a, self._sess_b
-        if b.output_buf.strip():
-            # Session B translated lang_a -> lang_b (speaker used lang_a).
-            text_a, text_b = b.input_buf, b.output_buf
-        elif a.output_buf.strip():
-            # Session A translated lang_b -> lang_a (speaker used lang_b).
-            text_a, text_b = a.output_buf, a.input_buf
-        else:
-            # No translation output yet — show whatever source transcript exists.
-            text_a = a.input_buf or b.input_buf
-            text_b = b.input_buf or a.input_buf
-        return text_a.strip(), text_b.strip()
+        spoken = guess_spoken(self._input_buf, self.lang_a, self.lang_b)
+        if spoken == "b":
+            return self._rev_out.strip(), self._input_buf.strip(), "b"
+        # lang_a spoken, or not yet known.
+        return self._input_buf.strip(), self._output_buf.strip(), spoken
 
     async def _emit_partial(self) -> None:
-        text_a, text_b = self._panes()
+        text_a, text_b, spoken = self._panes()
         if not text_a and not text_b:
             return
-        spoken = guess_spoken(text_a or text_b, self.lang_a, self.lang_b)
         await self.emit(TranslationEvent(
             kind="partial", segment_id=self._seg_id,
             lang_a=self.lang_a, lang_b=self.lang_b,
             text_a=self._zh(text_a, self.lang_a),
             text_b=self._zh(text_b, self.lang_b), spoken=spoken,
         ))
-
-    async def _emit_final(self) -> None:
-        text_a, text_b = self._panes()
-        spoken = guess_spoken(text_a or text_b, self.lang_a, self.lang_b)
-        await self.emit(TranslationEvent(
-            kind="final", segment_id=self._seg_id,
-            lang_a=self.lang_a, lang_b=self.lang_b,
-            text_a=self._zh(text_a, self.lang_a),
-            text_b=self._zh(text_b, self.lang_b), spoken=spoken,
-        ))
-        # Reset for next utterance.
-        self._seg_id = new_segment_id()
-        self._sess_a.input_buf = ""
-        self._sess_a.output_buf = ""
-        self._sess_b.input_buf = ""
-        self._sess_b.output_buf = ""
-        self._sess_a.turn_done = False
-        self._sess_b.turn_done = False

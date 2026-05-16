@@ -85,7 +85,10 @@ class _Session:
             "session": {
                 "audio": {
                     "input": {
-                        "transcription": {"model": "whisper-1"},
+                        # gpt-realtime-whisper is the transcription model the
+                        # translation endpoint expects; without a valid one the
+                        # source-language `input_transcript` is never emitted.
+                        "transcription": {"model": "gpt-realtime-whisper"},
                     },
                     "output": {
                         "language": tgt_code,
@@ -216,9 +219,31 @@ class CloudEngine(TranslationEngine):
                 text_a=f"[engine error] {detail}", text_b="",
             ))
 
+    def _panes(self) -> tuple[str, str]:
+        """Return (text_a, text_b).
+
+        Only the session that is actually *translating* (its target language
+        differs from what was spoken) reliably emits transcripts — it carries
+        both the source `input_transcript` and the translated `output_transcript`.
+        The other session is doing a passthrough (target == spoken language) and
+        the API emits it unreliably, so we never depend on it: both panes are
+        taken from the one translating session.
+        """
+        a, b = self._sess_a, self._sess_b
+        if b.output_buf.strip():
+            # Session B translated lang_a -> lang_b (speaker used lang_a).
+            text_a, text_b = b.input_buf, b.output_buf
+        elif a.output_buf.strip():
+            # Session A translated lang_b -> lang_a (speaker used lang_b).
+            text_a, text_b = a.output_buf, a.input_buf
+        else:
+            # No translation output yet — show whatever source transcript exists.
+            text_a = a.input_buf or b.input_buf
+            text_b = b.input_buf or a.input_buf
+        return text_a.strip(), text_b.strip()
+
     async def _emit_partial(self) -> None:
-        text_a = self._sess_a.text
-        text_b = self._sess_b.text
+        text_a, text_b = self._panes()
         if not text_a and not text_b:
             return
         spoken = guess_spoken(text_a or text_b, self.lang_a, self.lang_b)
@@ -230,8 +255,7 @@ class CloudEngine(TranslationEngine):
         ))
 
     async def _emit_final(self) -> None:
-        text_a = self._sess_a.text
-        text_b = self._sess_b.text
+        text_a, text_b = self._panes()
         spoken = guess_spoken(text_a or text_b, self.lang_a, self.lang_b)
         await self.emit(TranslationEvent(
             kind="final", segment_id=self._seg_id,

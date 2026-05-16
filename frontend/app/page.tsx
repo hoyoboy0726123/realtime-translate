@@ -51,11 +51,26 @@ export default function Home() {
 
   const busy = status === "live" || status === "connecting";
 
+  // Vertical layout: a few big marquee lines. Horizontal layout: each pane is
+  // tall and narrow, so fill the height with many smaller lines (CSS clips the
+  // overflow at the top).
+  const visibleLines = layout === "horizontal" ? 24 : 3;
+
   return (
     <main className={`stage stage-${layout}`}>
       <div className="panes">
-        <RollingSubtitles segments={segments} field="a" label={label(langA)} />
-        <RollingSubtitles segments={segments} field="b" label={label(langB)} />
+        <RollingSubtitles
+          segments={segments}
+          field="a"
+          label={label(langA)}
+          visible={visibleLines}
+        />
+        <RollingSubtitles
+          segments={segments}
+          field="b"
+          label={label(langB)}
+          visible={visibleLines}
+        />
       </div>
 
       <div className="controlbar">

@@ -104,6 +104,7 @@ a {
   flex-direction: column;
   justify-content: flex-end;
   gap: 0.35em;
+  overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
 }

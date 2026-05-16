@@ -1,18 +1,26 @@
-"""Cloud engine — OpenAI Realtime Translation API + local NLLB for the reverse
-direction.
+"""Cloud engine — OpenAI Realtime Translation API (into lang_a) + local NLLB.
 
-The translation API is one-directional per session, and running two sessions
-desyncs badly. So instead we run **one** OpenAI session (target = lang_b) and
-fill the other direction with the local NLLB translator:
+A fixed, deterministic pipeline:
 
-  * spoken == lang_a  -> OpenAI returns the lang_a transcript *and* the lang_b
-    translation; both panes come from the one session, perfectly in sync.
-  * spoken == lang_b  -> OpenAI's output is a passthrough; the lang_a pane is
-    produced by translating the lang_b transcript with NLLB.
+    speech (any language)  ->  LEFT pane  = lang_a text
+    LEFT pane              ->  RIGHT pane = lang_b text (translated by NLLB)
 
-This is a Chinese-primary setup: the main direction (lang_a -> lang_b) uses
-OpenAI; the occasional reverse direction uses NLLB. If NLLB is not installed
-the reverse direction is just left blank (graceful degradation).
+The OpenAI session's output language is fixed to lang_a, so the **left pane is
+always lang_a** — whatever is spoken it can never show the wrong language. The
+right pane is the left pane translated by NLLB.
+
+One OpenAI session gives two reliable transcripts:
+  * `input_transcript`  — what was actually spoken (any language);
+  * `output_transcript` — the lang_a translation (reliable when the spoken
+    language differs from lang_a; a same-language passthrough is unreliable, so
+    we never depend on it).
+
+So the lang_a left pane is taken from `input_transcript` when lang_a is spoken,
+and from `output_transcript` when lang_b is spoken — both reliable paths.
+
+The translation API emits no turn events, so an utterance is finalised after a
+short delta-silence, which also bounds the rolling buffer. If NLLB is not
+installed the right pane is left blank (graceful).
 
 Audio must be 24 kHz PCM16 mono.  The frontend sends 16 kHz, so we resample.
 """
@@ -22,6 +30,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 
 import numpy as np
 import websockets
@@ -35,8 +44,12 @@ TRANSLATION_URL = "wss://api.openai.com/v1/realtime/translations?model={model}"
 OPENAI_SAMPLE_RATE = 24_000
 TRANSCRIBE_MODEL = "gpt-realtime-whisper"
 
-# How often the reverse-direction (lang_b -> lang_a) NLLB translation refreshes.
-_NLLB_TICK = 1.2
+_NLLB_TICK = 1.2        # how often the right pane (NLLB) refreshes, seconds
+# Delta-silence before the current line is finalised. The translation API
+# streams in bursts, so this is generous — it should outlast a within-sentence
+# gap and only fire at a real pause / speaker change.
+_IDLE_FINALIZE = 3.0
+_FINALIZER_TICK = 0.3
 
 
 def _resample_16k_to_24k(pcm16_bytes: bytes) -> bytes:
@@ -66,27 +79,25 @@ class CloudEngine(TranslationEngine):
 
     def __init__(self, lang_a, lang_b, out_queue, settings):
         super().__init__(lang_a, lang_b, out_queue, settings)
-        self._code_a = languages.get(lang_a)["code"]
-        self._code_b = languages.get(lang_b)["code"]
-        self._target = self._code_b          # OpenAI translates into lang_b
+        # OpenAI translates *into* lang_a, so its output is always lang_a.
+        self._target = languages.get(lang_a)["code"]
         self._nllb_a = languages.get(lang_a)["nllb"]
         self._nllb_b = languages.get(lang_b)["nllb"]
 
         self._ws = None
         self._reader: asyncio.Task | None = None
         self._nllb_task: asyncio.Task | None = None
+        self._finalizer: asyncio.Task | None = None
         self._build_task: asyncio.Task | None = None
 
         self._seg_id = new_segment_id()
-        self._input_buf = ""    # transcript of whatever language was spoken
-        self._output_buf = ""   # OpenAI translation, in lang_b
+        self._input_buf = ""    # input_transcript — the spoken language
+        self._output_buf = ""   # output_transcript — the lang_a translation
+        self._rev_src = ""      # left-pane snapshot last handed to NLLB
+        self._rev_out = ""      # NLLB result — the lang_b text
+        self._last_delta: float | None = None
 
-        # Reverse direction (lang_b spoken -> lang_a pane), via local NLLB.
         self._translator = None     # NllbTranslator once loaded, else None
-        self._rev_src = ""          # input_buf snapshot last sent to NLLB
-        self._rev_out = ""          # NLLB result, in lang_a
-
-        # OpenCC converter for Simplified -> Traditional Chinese.
         self._zh_variant = settings.chinese_variant
         self._cc = None
 
@@ -115,21 +126,20 @@ class CloudEngine(TranslationEngine):
         }))
         self._reader = asyncio.create_task(self._read_loop())
         self._nllb_task = asyncio.create_task(self._nllb_loop())
-        # Load NLLB in the background so the session starts without waiting on it.
+        self._finalizer = asyncio.create_task(self._finalizer_loop())
+        # Load NLLB in the background so the session starts without waiting.
         self._build_task = asyncio.create_task(self._build_nllb())
 
     async def _build_nllb(self) -> None:
-        """Load the NLLB translator for the reverse direction (best-effort)."""
+        """Load the NLLB translator for the right pane (best-effort)."""
         try:
             from ..nllb import NllbTranslator
             translator = NllbTranslator(self.settings.local.translate_model)
             await asyncio.to_thread(translator.build)
             self._translator = translator
-            logging.info("[cloud] NLLB ready — reverse direction enabled")
+            logging.info("[cloud] NLLB ready — right pane enabled")
         except Exception as exc:  # noqa: BLE001
-            logging.warning(
-                f"[cloud] NLLB unavailable — reverse direction disabled: {exc}"
-            )
+            logging.warning(f"[cloud] NLLB unavailable — right pane disabled: {exc}")
 
     async def send_audio(self, pcm16: bytes) -> None:
         if not self._ws:
@@ -146,7 +156,7 @@ class CloudEngine(TranslationEngine):
             pass
 
     async def close(self) -> None:
-        for task in (self._build_task, self._nllb_task, self._reader):
+        for task in (self._build_task, self._finalizer, self._nllb_task, self._reader):
             if task:
                 task.cancel()
                 try:
@@ -178,10 +188,12 @@ class CloudEngine(TranslationEngine):
 
         if etype == "session.input_transcript.delta":
             self._input_buf += event.get("delta", "")
+            self._last_delta = time.monotonic()
             await self._emit_partial()
 
         elif etype == "session.output_transcript.delta":
             self._output_buf += event.get("delta", "")
+            self._last_delta = time.monotonic()
             await self._emit_partial()
 
         elif etype == "error":
@@ -193,25 +205,49 @@ class CloudEngine(TranslationEngine):
                 text_a=f"[engine error] {detail}", text_b="",
             ))
 
-    # ---- reverse-direction NLLB translation --------------------------------
+    # ---- left pane (always lang_a) -----------------------------------------
+
+    def _left(self) -> str:
+        """The lang_a (left-pane) text.
+
+        lang_a spoken -> the input transcript is already lang_a.
+        lang_b spoken -> the output transcript is the lang_a translation.
+        (We never use the same-language passthrough, which is unreliable.)
+        """
+        if guess_spoken(self._input_buf, self.lang_a, self.lang_b) == "a":
+            return self._input_buf.strip()
+        return self._output_buf.strip()
+
+    # ---- right pane (NLLB) + segmentation ----------------------------------
 
     async def _nllb_loop(self) -> None:
-        """Keep the lang_a pane updated (via NLLB) while lang_b is being spoken."""
+        """Keep the right pane in sync — translate the left (lang_a) to lang_b."""
         try:
             while True:
                 await asyncio.sleep(_NLLB_TICK)
                 if self._translator is None:
                     continue
-                if guess_spoken(self._input_buf, self.lang_a, self.lang_b) != "b":
-                    continue
-                src = self._input_buf.strip()
+                src = self._left()
                 if not src or src == self._rev_src:
                     continue
                 self._rev_src = src
                 self._rev_out = await asyncio.to_thread(
-                    self._translator.translate, src, self._nllb_b, self._nllb_a,
+                    self._translator.translate, src, self._nllb_a, self._nllb_b,
                 )
                 await self._emit_partial()
+        except asyncio.CancelledError:
+            pass
+
+    async def _finalizer_loop(self) -> None:
+        """Finalise the current line once OpenAI's deltas have gone quiet."""
+        try:
+            while True:
+                await asyncio.sleep(_FINALIZER_TICK)
+                if self._last_delta is None:
+                    continue
+                if time.monotonic() - self._last_delta >= _IDLE_FINALIZE:
+                    self._last_delta = None
+                    await self._emit_final()
         except asyncio.CancelledError:
             pass
 
@@ -223,25 +259,37 @@ class CloudEngine(TranslationEngine):
             return self._cc.convert(text)
         return text
 
-    def _panes(self) -> tuple[str, str, str | None]:
-        """(text_a, text_b, spoken).
-
-        spoken == lang_a : OpenAI translated lang_a -> lang_b (both panes synced).
-        spoken == lang_b : lang_b pane is the transcript; lang_a pane is NLLB.
-        """
-        spoken = guess_spoken(self._input_buf, self.lang_a, self.lang_b)
-        if spoken == "b":
-            return self._rev_out.strip(), self._input_buf.strip(), "b"
-        # lang_a spoken, or not yet known.
-        return self._input_buf.strip(), self._output_buf.strip(), spoken
-
     async def _emit_partial(self) -> None:
-        text_a, text_b, spoken = self._panes()
-        if not text_a and not text_b:
+        text_a = self._left()
+        text_b = self._rev_out.strip()
+        if not text_a:  # the left (lang_a) pane drives the line
             return
         await self.emit(TranslationEvent(
             kind="partial", segment_id=self._seg_id,
             lang_a=self.lang_a, lang_b=self.lang_b,
-            text_a=self._zh(text_a, self.lang_a),
-            text_b=self._zh(text_b, self.lang_b), spoken=spoken,
+            text_a=self._zh(text_a, self.lang_a), text_b=text_b,
+        ))
+
+    async def _emit_final(self) -> None:
+        text_a = self._left()
+        if not text_a:
+            return
+        seg_id = self._seg_id
+        # Reset before the (awaited) translation so trailing deltas start a
+        # fresh line instead of leaking into the one being finalised.
+        self._seg_id = new_segment_id()
+        self._input_buf = ""
+        self._output_buf = ""
+        self._rev_src = ""
+        self._rev_out = ""
+
+        text_b = ""
+        if self._translator is not None:
+            text_b = await asyncio.to_thread(
+                self._translator.translate, text_a, self._nllb_a, self._nllb_b,
+            )
+        await self.emit(TranslationEvent(
+            kind="final", segment_id=seg_id,
+            lang_a=self.lang_a, lang_b=self.lang_b,
+            text_a=self._zh(text_a, self.lang_a), text_b=text_b,
         ))

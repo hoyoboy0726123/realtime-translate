@@ -168,13 +168,39 @@ pip install -r requirements-local-mac.txt      # or: uv sync --extra local-mac
 ```
 
 **Windows / Linux** — ASR uses faster-whisper (CTranslate2), the summary LLM
-uses llama-cpp-python (GGUF). Both support NVIDIA CUDA; with a GPU, install the
-matching CUDA build of `torch` and `llama-cpp-python` (see their docs).
+uses llama-cpp-python (GGUF).
+
+*CPU-only* (works everywhere; live translation may lag behind real time):
 
 ```bash
 cd backend
 pip install -r requirements-local-windows.txt  # or: uv sync --extra local-win
 ```
+
+*NVIDIA GPU (recommended)* — **use CUDA 12.4**. This is the one version that
+satisfies both GPU components. **CUDA 11.x and CUDA 12.0–12.2 do NOT work**
+(CTranslate2 4.x needs CUDA ≥ 12.3 with cuDNN 9).
+
+1. Install **CUDA Toolkit 12.4** and **cuDNN 9** — put cuDNN's `bin` folder on
+   the system `PATH` (CTranslate2 fails to find the GPU if the cuDNN 9 DLLs
+   aren't on `PATH`).
+2. Keep **`torch` CPU-only**. NLLB translation runs on CPU, and a CUDA build of
+   torch bundles cuDNN 8, which clashes with CTranslate2's cuDNN 9 in the same
+   environment:
+   ```bash
+   pip install "torch>=2.2,<2.3" --index-url https://download.pytorch.org/whl/cpu
+   ```
+3. Install the rest — faster-whisper uses the GPU automatically once cuDNN 9 is
+   on `PATH`; llama-cpp-python needs its CUDA 12.4 prebuilt wheel:
+   ```bash
+   pip install faster-whisper sherpa-onnx transformers==4.44.2 sentencepiece opencc
+   pip install "llama-cpp-python>=0.3" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+   ```
+
+> CTranslate2 and llama-cpp-python do **not** conflict — both target CUDA 12.x.
+> The only real conflict is CUDA-torch's cuDNN 8 vs CTranslate2's cuDNN 9, which
+> step 2 (CPU-only torch) avoids entirely. sherpa-onnx bundles its own ONNX
+> Runtime and is independent. Never install `onnxruntime-gpu` here.
 
 **Both platforms:**
 
@@ -412,13 +438,35 @@ pip install -r requirements-local-mac.txt      # 或： uv sync --extra local-ma
 ```
 
 **Windows / Linux** —— 語音辨識走 faster-whisper（CTranslate2）、摘要 LLM 走
-llama-cpp-python（GGUF）。兩者都支援 NVIDIA CUDA；有顯卡時請額外安裝對應 CUDA
-版的 `torch` 與 `llama-cpp-python`（見各自官方文件）。
+llama-cpp-python（GGUF）。
+
+*純 CPU*（任何機器都能跑；即時翻譯可能跟不上語速）：
 
 ```bash
 cd backend
 pip install -r requirements-local-windows.txt  # 或： uv sync --extra local-win
 ```
+
+*NVIDIA GPU（建議）* —— **請用 CUDA 12.4**，這是唯一同時滿足兩個 GPU 元件的版本。
+**CUDA 11.x 與 CUDA 12.0–12.2 都不行**（CTranslate2 4.x 需要 CUDA ≥ 12.3 + cuDNN 9）。
+
+1. 安裝 **CUDA Toolkit 12.4** 與 **cuDNN 9** —— 把 cuDNN 的 `bin` 資料夾加進系統
+   `PATH`（cuDNN 9 的 DLL 不在 `PATH` 上時，CTranslate2 會找不到 GPU）。
+2. `torch` 維持 **CPU 版**。NLLB 翻譯本來就跑在 CPU，而 CUDA 版的 torch 內建
+   cuDNN 8，會與 CTranslate2 的 cuDNN 9 在同一環境裡衝突：
+   ```bash
+   pip install "torch>=2.2,<2.3" --index-url https://download.pytorch.org/whl/cpu
+   ```
+3. 安裝其餘套件 —— cuDNN 9 在 `PATH` 上後 faster-whisper 會自動用 GPU；
+   llama-cpp-python 需要它的 CUDA 12.4 預編譯輪：
+   ```bash
+   pip install faster-whisper sherpa-onnx transformers==4.44.2 sentencepiece opencc
+   pip install "llama-cpp-python>=0.3" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+   ```
+
+> CTranslate2 與 llama-cpp-python **不衝突** —— 兩者都用 CUDA 12.x。唯一的真實衝突
+> 是 CUDA 版 torch 的 cuDNN 8 與 CTranslate2 的 cuDNN 9，步驟 2（CPU 版 torch）
+> 已完全避開。sherpa-onnx 自帶 ONNX Runtime、獨立運作。請勿安裝 `onnxruntime-gpu`。
 
 **兩平台共通：**
 

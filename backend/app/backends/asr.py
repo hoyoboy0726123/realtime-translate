@@ -13,6 +13,8 @@ import os
 
 import numpy as np
 
+from ..text_guard import is_degenerate
+
 # faster-whisper model names keyed by the MLX repo stored in settings, so the
 # same settings.json works on both platforms.
 _MLX_TO_FW = {
@@ -74,22 +76,6 @@ def transcribe(samples: np.ndarray, model: str, language: str | None = None) -> 
 
     # Safety net: Whisper can still hallucinate a repetition loop ("書書書…",
     # "and a, and a, …") on silence or noise — drop a degenerate transcript.
-    if _is_degenerate(text):
+    if is_degenerate(text):
         return {"text": "", "language": lang}
     return {"text": text, "language": lang}
-
-
-def _is_degenerate(text: str) -> bool:
-    """True if `text` looks like a Whisper repetition-loop hallucination."""
-    t = text.strip()
-    if len(t) < 40:
-        return False  # too short to judge confidently
-    compact = t.replace(" ", "")
-    # Almost no distinct characters -> a single token repeated (e.g. 書書書…).
-    if compact and len(set(compact)) / len(compact) < 0.12:
-        return True
-    # Almost no distinct words -> a short phrase looped (e.g. "and a, and a…").
-    words = t.split()
-    if len(words) >= 12 and len(set(words)) / len(words) < 0.25:
-        return True
-    return False

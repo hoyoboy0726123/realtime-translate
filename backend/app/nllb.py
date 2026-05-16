@@ -6,6 +6,8 @@ the requirements-local-*.txt files). `src`/`tgt` are FLORES-200 codes
 """
 from __future__ import annotations
 
+from .text_guard import is_degenerate
+
 
 class NllbTranslator:
     """NLLB-200 translation model, loaded once and run on CPU."""
@@ -43,4 +45,7 @@ class NllbTranslator:
                 max_length=512,
                 num_beams=1,         # greedy — fast enough for near-real-time
             )
-        return self._tok.batch_decode(out, skip_special_tokens=True)[0].strip()
+        result = self._tok.batch_decode(out, skip_special_tokens=True)[0].strip()
+        # NLLB can also fall into a repetition loop — drop a degenerate result
+        # rather than show looping garbage in the pane.
+        return "" if is_degenerate(result) else result

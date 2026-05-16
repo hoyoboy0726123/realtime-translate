@@ -13,15 +13,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import wave
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from . import db
-from .config import load_settings
+from .config import RECORDINGS_DIR, SAMPLE_RATE, load_settings
 from .engines.base import TranslationEvent
 from .engines.registry import create_engine
 
 router = APIRouter()
+
+
+def _open_recording(session_id: str):
+    """Open a 16 kHz mono PCM16 WAV file to record the session audio."""
+    path = RECORDINGS_DIR / f"{session_id}.wav"
+    wav = wave.open(str(path), "wb")
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(SAMPLE_RATE)
+    return wav, str(path)
 
 
 async def _forward(websocket: WebSocket, queue: "asyncio.Queue[TranslationEvent]", session_id: str) -> None:
@@ -58,6 +70,15 @@ async def translate(websocket: WebSocket) -> None:
         db.create_session, session_name, settings.engine, settings.lang_a, settings.lang_b,
     )
 
+    # Record the raw audio so the session can be analysed (diarization +
+    # summary) after it ends. Recording is best-effort — never block translation.
+    wav = None
+    try:
+        wav, audio_path = _open_recording(session_id)
+        await asyncio.to_thread(db.set_audio_path, session_id, audio_path)
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"[ws] could not open recording: {exc}")
+
     queue: asyncio.Queue[TranslationEvent] = asyncio.Queue()
     engine = create_engine(settings, queue)
 
@@ -86,6 +107,8 @@ async def translate(websocket: WebSocket) -> None:
                 break
             if (data := message.get("bytes")) is not None:
                 await engine.send_audio(data)
+                if wav is not None:
+                    wav.writeframes(data)
             elif (text := message.get("text")) is not None:
                 payload = json.loads(text)
                 if payload.get("type") == "stop":
@@ -95,6 +118,11 @@ async def translate(websocket: WebSocket) -> None:
     finally:
         await engine.close()
         forwarder.cancel()
+        if wav is not None:
+            try:
+                wav.close()
+            except Exception:  # noqa: BLE001
+                pass
         await asyncio.to_thread(db.end_session, session_id)
         try:
             await websocket.close()

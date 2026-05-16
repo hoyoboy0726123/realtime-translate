@@ -40,20 +40,44 @@ a {
   height: 100vh;
 }
 
+/* The two subtitle panes: stacked (vertical) or side-by-side (horizontal). */
+.panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage-vertical .panes {
+  flex-direction: column;
+}
+
+.stage-horizontal .panes {
+  flex-direction: row;
+}
+
 .pane {
   position: relative;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   padding: 2.2rem 3vw 2rem;
   overflow: hidden;
 }
 
-.pane-top {
+/* Per-pane background glow + divider, directed by the active layout. */
+.stage-vertical .pane-a {
   background: radial-gradient(120% 100% at 50% 0%, #11202400, #0a0c10);
 }
-
-.pane-bottom {
+.stage-vertical .pane-b {
   background: radial-gradient(120% 100% at 50% 100%, #1f190f00, #0a0c10);
+  border-top: 1px solid var(--border);
+}
+.stage-horizontal .pane-a {
+  background: radial-gradient(100% 120% at 0% 50%, #11202400, #0a0c10);
+}
+.stage-horizontal .pane-b {
+  background: radial-gradient(100% 120% at 100% 50%, #1f190f00, #0a0c10);
+  border-left: 1px solid var(--border);
 }
 
 .pane-label {
@@ -66,11 +90,11 @@ a {
   font-weight: 700;
 }
 
-.pane-top .pane-label {
+.pane-a .pane-label {
   color: var(--accent-a);
 }
 
-.pane-bottom .pane-label {
+.pane-b .pane-label {
   color: var(--accent-b);
 }
 
@@ -91,7 +115,12 @@ a {
   animation: lineIn 0.32s ease-out;
 }
 
-.pane-bottom .line {
+/* Panes are half-width in the left/right layout — scale the text down. */
+.stage-horizontal .line {
+  font-size: clamp(1.4rem, 3vw, 2.9rem);
+}
+
+.pane-b .line {
   font-weight: 600;
   color: #d6dbe4;
 }

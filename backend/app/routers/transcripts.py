@@ -1,14 +1,15 @@
-"""Transcript history API: browse, export and delete recorded sessions."""
+"""Transcript history API: browse, analyse, export and delete recorded sessions."""
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import json
+import os
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from .. import db
+from ..postprocess.analyze import analyze_session
 
 router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
 
@@ -29,6 +30,28 @@ async def get_transcript(session_id: str) -> dict:
     if session is None:
         raise HTTPException(404, "Session not found")
     return session
+
+
+@router.post("/{session_id}/analyze")
+async def analyze(session_id: str) -> dict:
+    """Start post-session analysis (diarization + translation + summary).
+
+    Runs in the background; poll GET /{session_id} for `process_status` and the
+    resulting `diarized` transcript / `summary`.
+    """
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    audio_path = session.get("audio_path")
+    if not audio_path or not os.path.exists(audio_path):
+        raise HTTPException(400, "No recording available for this session")
+    if session.get("process_status") == "processing":
+        return {"status": "processing"}
+
+    await asyncio.to_thread(db.set_process_status, session_id, "processing")
+    # Run the (long, compute-bound) pipeline in a worker thread, fire-and-forget.
+    asyncio.create_task(asyncio.to_thread(analyze_session, session_id))
+    return {"status": "processing"}
 
 
 @router.get("/{session_id}/export.md", response_class=PlainTextResponse)

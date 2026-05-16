@@ -7,14 +7,17 @@ frontend/.env.local
 __pycache__/
 *.pyc
 backend/.venv/
-backend/data/*.db
-backend/data/settings.json
+
+# Runtime + downloaded data: settings, transcript DB, recordings, model files.
+# Recreated by the app / downloaded per the README.
+backend/data/
 
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env.local
+frontend/tsconfig.tsbuildinfo
 
 # misc
 .DS_Store

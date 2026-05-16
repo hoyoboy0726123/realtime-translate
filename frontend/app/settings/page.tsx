@@ -13,7 +13,7 @@ import {
 
 const ENGINE_LABEL: Record<string, string> = {
   cloud: "雲端 — OpenAI Realtime (gpt-realtime-translate)",
-  local: "地端 — Meta SeamlessStreaming（逐字即時翻譯）",
+  local: "地端 — MLX-Whisper + NLLB（Apple Silicon 原生）",
   mock: "示範 — 免金鑰／免模型，重播範例對話",
 };
 
@@ -114,8 +114,19 @@ export default function SettingsPage() {
             </select>
           </div>
         </div>
+        <div className="field">
+          <label>中文字體</label>
+          <select
+            value={settings.chinese_variant}
+            onChange={(e) => update({ chinese_variant: e.target.value })}
+          >
+            <option value="traditional">繁體中文</option>
+            <option value="simplified">简体中文</option>
+          </select>
+        </div>
         <p className="sub" style={{ marginBottom: 0 }}>
           鎖定後，無論講者說語言 A 或 B，模型只會在這兩種語言之間互譯。
+          中文字幕可選繁體或簡體（繁體以 OpenCC 轉換為台灣用語），雲端與地端引擎皆適用。
         </p>
       </div>
 
@@ -141,59 +152,61 @@ export default function SettingsPage() {
         <div className="card">
           <div className="field-row">
             <div className="field">
-              <label>運算裝置</label>
-              <select
-                value={settings.local.device}
+              <label>語音辨識模型（即時字幕）</label>
+              <input
+                type="text"
+                value={settings.local.whisper_model}
                 onChange={(e) =>
-                  update({ local: { ...settings.local, device: e.target.value } })
+                  update({
+                    local: { ...settings.local, whisper_model: e.target.value },
+                  })
                 }
-              >
-                <option value="mps">mps（Apple Silicon）</option>
-                <option value="cpu">cpu</option>
-                <option value="cuda">cuda</option>
-              </select>
+              />
             </div>
             <div className="field">
-              <label>音訊區塊大小（毫秒）</label>
+              <label>語音辨識模型（錄音分析）</label>
               <input
-                type="number"
-                min={160}
-                max={1000}
-                step={80}
-                value={settings.local.source_segment_size_ms}
+                type="text"
+                value={settings.local.analyze_whisper_model}
                 onChange={(e) =>
                   update({
                     local: {
                       ...settings.local,
-                      source_segment_size_ms: Number(e.target.value),
+                      analyze_whisper_model: e.target.value,
                     },
                   })
                 }
               />
             </div>
             <div className="field">
-              <label>輸出門檻 decision_threshold</label>
+              <label>翻譯模型（NLLB）</label>
               <input
-                type="number"
-                min={0.1}
-                max={0.9}
-                step={0.05}
-                value={settings.local.decision_threshold}
+                type="text"
+                value={settings.local.translate_model}
                 onChange={(e) =>
                   update({
-                    local: {
-                      ...settings.local,
-                      decision_threshold: Number(e.target.value),
-                    },
+                    local: { ...settings.local, translate_model: e.target.value },
+                  })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>摘要模型（錄音分析 LLM）</label>
+              <input
+                type="text"
+                value={settings.local.summary_model}
+                onChange={(e) =>
+                  update({
+                    local: { ...settings.local, summary_model: e.target.value },
                   })
                 }
               />
             </div>
           </div>
           <p className="sub" style={{ marginBottom: 0 }}>
-            使用 Meta SeamlessStreaming 逐字同步翻譯。區塊越小、門檻越低，字詞出現越快（延遲越低）；
-            數值越大則翻譯越準。首次使用會自動下載模型權重，請先安裝{" "}
-            <code>requirements-local.txt</code> 並 git 安裝 <code>seamless_communication</code>。
+            地端引擎：MLX-Whisper 做語音辨識（Apple Silicon 原生加速），NLLB-200 做翻譯。
+            即時字幕用較快的 turbo 模型；錄音分析離線執行，可用較大、較準的完整模型。
+            首次使用會自動下載模型權重，請先安裝 <code>requirements-local.txt</code>。
           </p>
         </div>
       )}

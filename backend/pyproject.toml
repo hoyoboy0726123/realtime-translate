@@ -9,20 +9,43 @@ dependencies = [
     "websockets>=13.0",
     "python-dotenv>=1.0",
     "pydantic>=2.7",
-    "numpy>=1.26",
+    "numpy>=1.26,<2",
 ]
 
-# Dependencies for the on-device SeamlessStreaming engine.
-# Enable with:  uv sync --extra local
-# Note: seamless_communication is not on PyPI — after syncing, also run:
-#   uv pip install "git+https://github.com/facebookresearch/seamless_communication.git"
+# Dependencies for the on-device engine + post-session analysis. Pick the
+# extra that matches the platform:
+#   Apple Silicon Mac :  uv sync --extra local-mac
+#   Windows / Linux   :  uv sync --extra local-win
+# transformers is pinned to 4.44.x: newer releases require torch >= 2.4, but
+# torch must stay at 2.2.x for the NLLB translation path to load.
 [project.optional-dependencies]
+# Shared: NLLB translation, Chinese conversion, speaker diarization.
 local = [
-    "torch>=2.2",
-    "torchaudio>=2.2",
+    "transformers>=4.44,<4.45",
+    "torch>=2.2,<2.3",
     "sentencepiece>=0.2",
-    "fairseq2>=0.2",
-    "simuleval>=1.1",
+    "opencc>=1.1",
+    "sherpa-onnx>=1.10",
+]
+# Apple Silicon — MLX-Whisper (ASR) + mlx-lm (summary LLM).
+local-mac = [
+    "transformers>=4.44,<4.45",
+    "torch>=2.2,<2.3",
+    "sentencepiece>=0.2",
+    "opencc>=1.1",
+    "sherpa-onnx>=1.10",
+    "mlx-whisper>=0.4",
+    "mlx-lm>=0.20",
+]
+# Windows / Linux — faster-whisper (CTranslate2) + llama-cpp-python (summary).
+local-win = [
+    "transformers>=4.44,<4.45",
+    "torch>=2.2,<2.3",
+    "sentencepiece>=0.2",
+    "opencc>=1.1",
+    "sherpa-onnx>=1.10",
+    "faster-whisper>=1.0",
+    "llama-cpp-python>=0.3",
 ]
 
 [tool.uv]

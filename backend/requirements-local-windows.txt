@@ -1,0 +1,24 @@
+# On-device engine + recording analysis — Windows / Linux.
+#
+#   pip install -r requirements-local-windows.txt
+#
+# Speech recognition uses faster-whisper (CTranslate2) and the summary LLM uses
+# llama-cpp-python (GGUF) — both run on NVIDIA CUDA if available, otherwise CPU.
+# Translation (NLLB) runs via transformers; speaker diarization uses
+# sherpa-onnx (ONNX, no torch).
+#
+# transformers is pinned to 4.44.x — newer releases require torch >= 2.4.
+# For NVIDIA GPU acceleration install a CUDA build of torch, and for
+# llama-cpp-python see its docs for a CUDA wheel.
+# First use downloads the models (Whisper, NLLB ~2.4 GB, Qwen2.5-7B GGUF ~4.7 GB).
+# Speaker-diarization models download from sherpa-onnx releases into
+# data/diarization/ (see README).
+
+transformers>=4.44,<4.45
+torch>=2.2,<2.3
+sentencepiece>=0.2
+numpy>=1.26,<2
+opencc>=1.1
+sherpa-onnx>=1.10
+faster-whisper>=1.0
+llama-cpp-python>=0.3

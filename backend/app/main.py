@@ -14,6 +14,7 @@ from .routers import settings, transcripts
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
+    db.reset_stuck_processing()
     yield
 
 

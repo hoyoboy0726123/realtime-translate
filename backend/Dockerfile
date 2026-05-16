@@ -1,6 +1,6 @@
 # Backend image — FastAPI + uvicorn, dependencies installed with uv.
-# Covers the "cloud" and "mock" engines. The on-device SeamlessStreaming
-# ("local") engine needs MPS/CUDA and is best run natively (see README).
+# Covers the "cloud" and "mock" engines. The on-device "local" engine
+# (MLX-Whisper) needs Apple Silicon and is best run natively (see README).
 FROM python:3.12-slim
 
 # Bring in the uv binary from its official image.

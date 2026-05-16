@@ -1,0 +1,22 @@
+# On-device engine + recording analysis — Apple Silicon (MLX).
+#
+#   pip install -r requirements-local-mac.txt
+#
+# Speech recognition and the summary LLM run on Apple's MLX runtime (fast,
+# native on M-series chips). Translation (NLLB) runs on CPU via transformers;
+# speaker diarization uses sherpa-onnx (ONNX, no torch).
+#
+# transformers is pinned to 4.44.x — newer releases require torch >= 2.4.
+# First use downloads the models: whisper-large-v3-turbo / whisper-large-v3
+# (~1.6 GB each), nllb-200-distilled-600M (~2.4 GB), Qwen2.5-7B (~4.3 GB).
+# Speaker-diarization models download from sherpa-onnx releases into
+# data/diarization/ (see README).
+
+transformers>=4.44,<4.45
+torch>=2.2,<2.3
+sentencepiece>=0.2
+numpy>=1.26,<2
+opencc>=1.1
+sherpa-onnx>=1.10
+mlx-whisper>=0.4
+mlx-lm>=0.20

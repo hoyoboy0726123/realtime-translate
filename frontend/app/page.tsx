@@ -13,11 +13,14 @@ const STATUS_TEXT: Record<string, string> = {
   error: "錯誤",
 };
 
+type Layout = "vertical" | "horizontal";
+
 export default function Home() {
   const { status, segments, info, error, start, stop } = useTranslator();
   const [langs, setLangs] = useState<Language[]>([]);
   const [pair, setPair] = useState({ a: "zh", b: "en", engine: "mock" });
   const [sessionName, setSessionName] = useState("");
+  const [layout, setLayout] = useState<Layout>("vertical");
 
   useEffect(() => {
     getLanguages().then(setLangs).catch(() => {});
@@ -25,7 +28,17 @@ export default function Home() {
       .then((s) => setPair({ a: s.lang_a, b: s.lang_b, engine: s.engine }))
       .catch(() => {});
     setSessionName(`會議 ${new Date().toLocaleString()}`);
+    const saved = localStorage.getItem("subtitleLayout");
+    if (saved === "horizontal" || saved === "vertical") setLayout(saved);
   }, []);
+
+  const toggleLayout = () => {
+    setLayout((cur) => {
+      const next: Layout = cur === "vertical" ? "horizontal" : "vertical";
+      localStorage.setItem("subtitleLayout", next);
+      return next;
+    });
+  };
 
   const langA = info.langA ?? pair.a;
   const langB = info.langB ?? pair.b;
@@ -39,13 +52,11 @@ export default function Home() {
   const busy = status === "live" || status === "connecting";
 
   return (
-    <main className="stage">
-      <RollingSubtitles
-        segments={segments}
-        field="a"
-        position="top"
-        label={label(langA)}
-      />
+    <main className={`stage stage-${layout}`}>
+      <div className="panes">
+        <RollingSubtitles segments={segments} field="a" label={label(langA)} />
+        <RollingSubtitles segments={segments} field="b" label={label(langB)} />
+      </div>
 
       <div className="controlbar">
         <span className="brand">Realtime Translate</span>
@@ -57,6 +68,10 @@ export default function Home() {
         </span>
 
         <span className="spacer" />
+
+        <button className="navlink" onClick={toggleLayout}>
+          {layout === "vertical" ? "⇆ 改為左右顯示" : "⇅ 改為上下顯示"}
+        </button>
 
         <input
           type="text"
@@ -87,13 +102,6 @@ export default function Home() {
       </div>
 
       {error && <div className="errorbar">{error}</div>}
-
-      <RollingSubtitles
-        segments={segments}
-        field="b"
-        position="bottom"
-        label={label(langB)}
-      />
     </main>
   );
 }

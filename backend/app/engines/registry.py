@@ -5,12 +5,12 @@ from asyncio import Queue
 
 from .base import TranslationEngine, TranslationEvent
 from .cloud_openai import CloudEngine
-from .local_seamless import LocalEngine
+from .local_whisper import WhisperEngine
 from .mock import MockEngine
 
 ENGINES: dict[str, type[TranslationEngine]] = {
     "cloud": CloudEngine,
-    "local": LocalEngine,
+    "local": WhisperEngine,
     "mock": MockEngine,
 }
 

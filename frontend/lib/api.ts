@@ -14,13 +14,13 @@ export interface Settings {
   engine: string;
   lang_a: string;
   lang_b: string;
+  chinese_variant: string;
   cloud: { model: string };
   local: {
-    device: string;
-    source_segment_size_ms: number;
-    decision_threshold: number;
-    unity_model: string;
-    monotonic_decoder_model: string;
+    whisper_model: string;
+    analyze_whisper_model: string;
+    translate_model: string;
+    summary_model: string;
   };
 }
 
@@ -33,6 +33,10 @@ export interface SessionSummary {
   started_at: number;
   ended_at: number | null;
   segment_count: number;
+  audio_path: string | null;
+  process_status: string | null;   // null | processing | done | failed
+  processed_at: number | null;
+  summary: string | null;
 }
 
 export interface StoredSegment {
@@ -45,8 +49,18 @@ export interface StoredSegment {
   spoken: string | null;
 }
 
+export interface DiarizedSegment {
+  idx: number;
+  speaker: string;
+  start_ms: number;
+  end_ms: number;
+  text_a: string;
+  text_b: string;
+}
+
 export interface SessionDetail extends SessionSummary {
   segments: StoredSegment[];
+  diarized: DiarizedSegment[];
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -84,4 +98,14 @@ export const getTranscript = (id: string) =>
 
 export async function deleteTranscript(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/transcripts/${id}`, { method: "DELETE" });
+}
+
+export async function analyzeTranscript(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/transcripts/${id}/analyze`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
 }

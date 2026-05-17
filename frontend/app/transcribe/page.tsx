@@ -29,7 +29,7 @@ const speakerColor = (speaker: string) => {
 
 // Analysis pipeline stages, in order.
 const STAGES = [
-  { key: "diarizing", label: "轉錄與講者辨識" },
+  { key: "diarizing", label: "轉錄" },
   { key: "translating", label: "翻譯" },
   { key: "summarizing", label: "產生摘要" },
 ];
@@ -47,13 +47,15 @@ export default function TranscribePage() {
   const [err, setErr] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [identifySpeakers, setIdentifySpeakers] = useState(false);
+  const [recFilter, setRecFilter] = useState("");
   const startRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
     getTranscripts()
       .then((all) => {
-        setSessions(all.filter((s) => s.engine === "upload"));
+        setSessions(all);
         setLoading(false);
       })
       .catch((e) => {
@@ -116,13 +118,13 @@ export default function TranscribePage() {
       if (!detail) return;
       setErr(null);
       try {
-        await analyzeTranscript(detail.id, stage);
+        await analyzeTranscript(detail.id, stage, identifySpeakers);
         setDetail(await getTranscript(detail.id));
       } catch (e) {
         setErr(`無法開始：${(e as Error).message}`);
       }
     },
-    [detail],
+    [detail, identifySpeakers],
   );
 
   const remove = useCallback(
@@ -134,11 +136,27 @@ export default function TranscribePage() {
     [detail, refresh],
   );
 
+  const open = useCallback(
+    (id: string) => {
+      getTranscript(id).then(setDetail).catch(() => {});
+    },
+    [],
+  );
+
+  const uploads = sessions.filter((s) => s.engine === "upload");
+  const recordings = sessions.filter(
+    (s) => s.engine !== "upload" && s.audio_path,
+  );
+  const recQuery = recFilter.trim().toLowerCase();
+  const filteredRecordings = recQuery
+    ? recordings.filter((s) => s.name.toLowerCase().includes(recQuery))
+    : recordings;
+
   return (
     <div className="page">
       <h1>音訊／影片轉錄</h1>
       <p className="sub">
-        上傳任意音訊或影片檔，獨立轉錄、翻譯、製作字幕或摘要 —— 不限於本 App 內錄製的內容。
+        上傳外部檔案，或挑選本 App 既有的錄音檔，獨立轉錄、翻譯、製作字幕或摘要。
         <Link className="navlink" href="/" style={{ marginLeft: 12 }}>
           ← 回到即時翻譯
         </Link>
@@ -173,41 +191,102 @@ export default function TranscribePage() {
       </div>
 
       {/* --- Selected file: staged workflow --- */}
-      {detail && <FileWorkflow detail={detail} elapsed={elapsed} runStage={runStage} />}
+      {detail && (
+        <FileWorkflow
+          detail={detail}
+          elapsed={elapsed}
+          runStage={runStage}
+          identifySpeakers={identifySpeakers}
+          setIdentifySpeakers={setIdentifySpeakers}
+        />
+      )}
+
+      {/* --- Project recordings --- */}
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>專案內的錄音檔</h2>
+        <p className="sub" style={{ marginTop: 0 }}>
+          本 App 即時翻譯時錄下的錄音，可在此挑選並做轉錄、字幕或摘要處理。
+        </p>
+        {recordings.length > 0 && (
+          <input
+            type="text"
+            placeholder="輸入名稱搜尋錄音檔…"
+            value={recFilter}
+            onChange={(e) => setRecFilter(e.target.value)}
+            style={{ width: "100%", marginBottom: 10, padding: "6px 10px" }}
+          />
+        )}
+        {loading ? (
+          <p className="sub">載入中…</p>
+        ) : recordings.length === 0 ? (
+          <p className="sub">目前沒有任何錄音檔。</p>
+        ) : filteredRecordings.length === 0 ? (
+          <p className="sub">找不到符合「{recFilter}」的錄音檔。</p>
+        ) : (
+          filteredRecordings.map((s) => (
+            <SessionRow key={s.id} s={s} onOpen={() => open(s.id)} />
+          ))
+        )}
+      </div>
 
       {/* --- Uploaded files --- */}
       <div className="card">
         <h2 style={{ marginTop: 0 }}>已上傳的檔案</h2>
         {loading ? (
           <p className="sub">載入中…</p>
-        ) : sessions.length === 0 ? (
+        ) : uploads.length === 0 ? (
           <p className="sub">尚未上傳任何檔案。</p>
         ) : (
-          sessions.map((s) => (
-            <div key={s.id} className="session-row">
-              <div className="meta">
-                <div className="title">
-                  {s.name}
-                  {s.process_status === "done" && (
-                    <span className="sub" style={{ marginLeft: 8 }}>
-                      {s.summary ? "✓ 含摘要" : "✓ 已轉錄"}
-                    </span>
-                  )}
-                  {isProcessing(s.process_status) && (
-                    <span className="sub" style={{ marginLeft: 8 }}>處理中…</span>
-                  )}
-                  {s.process_status === "failed" && (
-                    <span className="sub" style={{ marginLeft: 8 }}>✗ 失敗</span>
-                  )}
-                </div>
-                <div className="when">{fmt(s.started_at)}</div>
-              </div>
-              <button onClick={() => getTranscript(s.id).then(setDetail)}>開啟</button>
-              <button className="stop" onClick={() => remove(s.id)}>刪除</button>
-            </div>
+          uploads.map((s) => (
+            <SessionRow
+              key={s.id}
+              s={s}
+              onOpen={() => open(s.id)}
+              onDelete={() => remove(s.id)}
+            />
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+function SessionRow({
+  s,
+  onOpen,
+  onDelete,
+}: {
+  s: SessionSummary;
+  onOpen: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <div className="session-row">
+      <div className="meta">
+        <div className="title">
+          {s.name}
+          {s.process_status === "done" && (
+            <span className="sub" style={{ marginLeft: 8 }}>
+              {s.summary ? "✓ 含摘要" : "✓ 已轉錄"}
+            </span>
+          )}
+          {isProcessing(s.process_status) && (
+            <span className="sub" style={{ marginLeft: 8 }}>處理中…</span>
+          )}
+          {s.process_status === "failed" && (
+            <span className="sub" style={{ marginLeft: 8 }}>✗ 失敗</span>
+          )}
+        </div>
+        <div className="when">
+          {fmt(s.started_at)} · {s.engine} · {s.lang_a}/{s.lang_b}
+        </div>
+      </div>
+      <button onClick={onOpen}>開啟</button>
+      {onDelete && (
+        <button className="stop" onClick={onDelete}>
+          刪除
+        </button>
+      )}
     </div>
   );
 }
@@ -216,10 +295,14 @@ function FileWorkflow({
   detail,
   elapsed,
   runStage,
+  identifySpeakers,
+  setIdentifySpeakers,
 }: {
   detail: SessionDetail;
   elapsed: number;
   runStage: (stage: AnalyzeStage) => void;
+  identifySpeakers: boolean;
+  setIdentifySpeakers: (v: boolean) => void;
 }) {
   const status = detail.process_status;
   const processing = isProcessing(status);
@@ -288,8 +371,25 @@ function FileWorkflow({
           步驟一 · 轉錄與翻譯 {hasTranscript && <span className="sub">✓ 已完成</span>}
         </h3>
         <p className="sub" style={{ marginTop: 0 }}>
-          辨識講者、逐句轉錄並翻譯成中英雙語。完成後即可匯出 SRT 字幕。
+          逐句轉錄並翻譯成中英雙語。完成後即可匯出 SRT 字幕或逐字稿。
         </p>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+            cursor: processing ? "default" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={identifySpeakers}
+            disabled={processing}
+            onChange={(e) => setIdentifySpeakers(e.target.checked)}
+          />
+          <span>識別講者（分辨不同說話者；不勾選則僅轉錄文字）</span>
+        </label>
         <button onClick={() => runStage("transcript")} disabled={processing}>
           {hasTranscript ? "重新轉錄" : "開始轉錄與翻譯"}
         </button>
@@ -308,37 +408,33 @@ function FileWorkflow({
         </button>
       </div>
 
-      {/* SRT export */}
+      {/* Export */}
       {hasTranscript && (
         <div style={{ marginBottom: 14 }}>
           <h3 style={{ margin: "0 0 6px" }}>匯出字幕 / 文字</h3>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
-              { track: "both", label: "SRT（雙語）" },
-              { track: "a", label: `SRT（${detail.lang_a}）` },
-              { track: "b", label: `SRT（${detail.lang_b}）` },
-              { track: "md", label: "Markdown" },
-            ].map((o) =>
-              o.track === "md" ? (
-                <a
-                  key={o.track}
-                  href={`${API_BASE}/api/transcripts/${detail.id}/export.md`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <button>{o.label}</button>
-                </a>
-              ) : (
-                <a
-                  key={o.track}
-                  href={`${API_BASE}/api/transcripts/${detail.id}/export.srt?track=${o.track}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <button>{o.label}</button>
-                </a>
-              ),
-            )}
+              {
+                label: "SRT（雙語）",
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.srt?track=both`,
+              },
+              {
+                label: `SRT（${detail.lang_a}）`,
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.srt?track=a`,
+              },
+              {
+                label: `SRT（${detail.lang_b}）`,
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.srt?track=b`,
+              },
+              {
+                label: "逐字稿（txt）",
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.txt?track=both`,
+              },
+            ].map((o) => (
+              <a key={o.label} href={o.href} target="_blank" rel="noreferrer">
+                <button>{o.label}</button>
+              </a>
+            ))}
           </div>
         </div>
       )}
@@ -354,14 +450,18 @@ function FileWorkflow({
       {/* Transcript */}
       {hasTranscript && (
         <div>
-          <h3>逐句記錄（含講者）</h3>
+          <h3>{detail.diarized.some((d) => d.speaker) ? "逐句記錄（含講者）" : "逐句記錄"}</h3>
           {detail.diarized.map((d) => (
             <div key={d.idx} className="seg">
               <div className="seg-ts">
-                <span style={{ color: speakerColor(d.speaker), fontWeight: 600 }}>
-                  {d.speaker}
+                {d.speaker && (
+                  <span style={{ color: speakerColor(d.speaker), fontWeight: 600 }}>
+                    {d.speaker}
+                  </span>
+                )}
+                <span style={{ marginLeft: d.speaker ? 8 : 0 }}>
+                  {clock(d.start_ms)}
                 </span>
-                <span style={{ marginLeft: 8 }}>{clock(d.start_ms)}</span>
               </div>
               <div className="seg-a">
                 ({detail.lang_a}) {d.text_a}

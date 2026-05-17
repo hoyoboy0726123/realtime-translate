@@ -57,12 +57,14 @@ def _on_analyze_done(session_id: str, future) -> None:
         _analyze_pool = None  # a crashed worker breaks the whole pool
 
 
-def _start_analysis(session_id: str, stage: str = "summary") -> None:
+def _start_analysis(
+    session_id: str, stage: str = "summary", diarize: bool = True,
+) -> None:
     """Kick off the analysis pipeline in the worker process (fire-and-forget).
 
     Must be called from within the running event loop."""
     future = asyncio.get_running_loop().run_in_executor(
-        _pool(), analyze_session, session_id, stage,
+        _pool(), analyze_session, session_id, stage, diarize,
     )
     future.add_done_callback(lambda f: _on_analyze_done(session_id, f))
 
@@ -123,11 +125,15 @@ async def get_audio(session_id: str):
 
 
 @router.post("/{session_id}/analyze")
-async def analyze(session_id: str, stage: str = "summary") -> dict:
+async def analyze(
+    session_id: str, stage: str = "summary", diarize: bool = True,
+) -> dict:
     """Start post-session analysis. Each stage is usable on its own:
 
       stage=transcript — diarization + transcription + translation only.
       stage=summary    — also the LLM summary; reuses an existing transcript.
+
+    `diarize=false` skips speaker identification (faster, no speaker labels).
 
     Runs in the background; poll GET /{session_id} for `process_status` —
     `diarizing` -> `translating` -> `summarizing` -> `done` (or `failed`).
@@ -150,7 +156,7 @@ async def analyze(session_id: str, stage: str = "summary") -> dict:
     await asyncio.to_thread(db.set_process_status, session_id, initial)
     # Run the heavy pipeline in a separate process — the backend stays
     # responsive while it runs.
-    _start_analysis(session_id, stage)
+    _start_analysis(session_id, stage, diarize)
     return {"status": initial}
 
 
@@ -263,6 +269,40 @@ async def export_srt(session_id: str, track: str = "both") -> PlainTextResponse:
         body,
         media_type="application/x-subrip",
         headers={"Content-Disposition": f'attachment; filename="{session_id}.srt"'},
+    )
+
+
+@router.get("/{session_id}/export.txt", response_class=PlainTextResponse)
+async def export_txt(session_id: str, track: str = "both") -> PlainTextResponse:
+    """Plain-text transcript of the analysed session — one utterance per block,
+    no timestamps. `track`: `both`, `a`, or `b`. Requires analysis first.
+    """
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    diar = session.get("diarized") or []
+    if not diar:
+        raise HTTPException(400, "尚未分析此記錄，無法匯出逐字稿")
+    if track not in ("both", "a", "b"):
+        track = "both"
+
+    blocks: list[str] = []
+    for d in diar:
+        if track == "a":
+            lines = [d["text_a"]]
+        elif track == "b":
+            lines = [d["text_b"]]
+        else:
+            lines = [d["text_a"], d["text_b"]]
+        lines = [ln.strip() for ln in lines if ln and ln.strip()]
+        if lines:
+            blocks.append("\n".join(lines))
+
+    body = "\n\n".join(blocks) + "\n" if blocks else ""
+    return PlainTextResponse(
+        body,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.txt"'},
     )
 
 

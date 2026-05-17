@@ -78,6 +78,50 @@ def _read_wav(wav_path: str) -> tuple[np.ndarray, int]:
     return samples, sample_rate
 
 
+def transcribe_only(wav_path: str, whisper_model: str) -> list[dict]:
+    """Transcribe a recording without speaker diarization.
+
+    A single Whisper pass over the whole file; utterances are its sentence
+    segments, all with an empty speaker label. Faster than diarization and
+    used when the caller opts out of identifying speakers.
+
+    Blocking / compute-bound — run via asyncio.to_thread.
+    """
+    samples, sample_rate = _read_wav(wav_path)
+    if len(samples) < sample_rate:  # under ~1 s of audio
+        return []
+
+    tr = asr.transcribe(samples, whisper_model)
+    if not tr["text"]:
+        return []
+
+    lang = tr["language"]
+    segs = tr.get("segments") or []
+    if not segs:  # no sentence breaks — keep the whole thing as one utterance
+        return [{
+            "speaker": "", "start_ms": 0,
+            "end_ms": int(len(samples) / sample_rate * 1000),
+            "text": tr["text"], "lang": lang,
+        }]
+
+    utterances: list[dict] = []
+    for s in segs:
+        text = s["text"].strip()
+        if not text:
+            continue
+        start, end = s["start"], s["end"]
+        if end <= start:
+            end = start + _MIN_SEG_SEC
+        utterances.append({
+            "speaker": "",
+            "start_ms": int(start * 1000),
+            "end_ms": int(end * 1000),
+            "text": text,
+            "lang": lang,
+        })
+    return utterances
+
+
 def diarize_and_transcribe(wav_path: str, whisper_model: str) -> list[dict]:
     """Diarize a recording and transcribe each speaker turn.
 

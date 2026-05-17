@@ -107,9 +107,10 @@ export type AnalyzeStage = "transcript" | "summary";
 export async function analyzeTranscript(
   id: string,
   stage: AnalyzeStage = "summary",
+  diarize = true,
 ): Promise<void> {
   const res = await fetch(
-    `${API_BASE}/api/transcripts/${id}/analyze?stage=${stage}`,
+    `${API_BASE}/api/transcripts/${id}/analyze?stage=${stage}&diarize=${diarize}`,
     { method: "POST" },
   );
   if (!res.ok) {

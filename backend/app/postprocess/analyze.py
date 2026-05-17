@@ -14,12 +14,14 @@ import logging
 
 from .. import db
 from ..config import load_settings
-from .diarize import diarize_and_transcribe
+from .diarize import diarize_and_transcribe, transcribe_only
 from .summarize import summarize
 from .translate import translate_utterances
 
 
-def analyze_session(session_id: str, stage: str = "summary") -> None:
+def analyze_session(
+    session_id: str, stage: str = "summary", diarize: bool = True,
+) -> None:
     """Run the analysis pipeline for one recorded or uploaded session.
 
     `stage` controls how far the pipeline runs — each stage is usable on its
@@ -27,6 +29,9 @@ def analyze_session(session_id: str, stage: str = "summary") -> None:
       "transcript" — diarize + transcribe + translate, then stop.
       "summary"    — also produce the LLM summary. If a transcript already
                      exists for this session, only the summary step runs.
+
+    `diarize` — when False, skip speaker diarization and just transcribe the
+    whole file (faster; utterances carry no speaker label).
     """
     session = db.get_session(session_id)
     if session is None or not session.get("audio_path"):
@@ -44,9 +49,11 @@ def analyze_session(session_id: str, stage: str = "summary") -> None:
         # 1+2. diarize + transcribe + translate — unless a transcript already
         # exists and we were only asked for the summary.
         if not (stage == "summary" and diarized):
-            # 1. diarize + transcribe (full large-v3 — accuracy over speed)
+            # 1. transcribe (full large-v3 — accuracy over speed), with or
+            #    without speaker diarization.
             db.set_process_status(session_id, "diarizing")
-            utterances = diarize_and_transcribe(
+            transcribe = diarize_and_transcribe if diarize else transcribe_only
+            utterances = transcribe(
                 session["audio_path"], local.analyze_whisper_model,
             )
             if not utterances:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
+from concurrent.futures import ProcessPoolExecutor
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -15,6 +16,18 @@ router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
 
 # process_status values that mean analysis is still running.
 _PROCESSING = {"processing", "diarizing", "translating", "summarizing"}
+
+# The analysis pipeline is heavy (Whisper + NLLB + a 7B LLM). It runs in a
+# separate *process* so its compute never starves the backend's event loop or
+# blocks live translation. One worker — analyses run one at a time.
+_analyze_pool: ProcessPoolExecutor | None = None
+
+
+def _pool() -> ProcessPoolExecutor:
+    global _analyze_pool
+    if _analyze_pool is None:
+        _analyze_pool = ProcessPoolExecutor(max_workers=1)
+    return _analyze_pool
 
 
 def _fmt_ts(ms: int) -> str:
@@ -64,8 +77,9 @@ async def analyze(session_id: str) -> dict:
         return {"status": session["process_status"]}
 
     await asyncio.to_thread(db.set_process_status, session_id, "diarizing")
-    # Run the (long, compute-bound) pipeline in a worker thread, fire-and-forget.
-    asyncio.create_task(asyncio.to_thread(analyze_session, session_id))
+    # Run the heavy pipeline in a separate process, fire-and-forget — the
+    # backend stays responsive while it runs.
+    asyncio.get_running_loop().run_in_executor(_pool(), analyze_session, session_id)
     return {"status": "diarizing"}
 
 

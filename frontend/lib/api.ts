@@ -103,19 +103,23 @@ export async function deleteTranscript(id: string): Promise<void> {
 // stage "transcript" runs diarization + translation only; "summary" also
 // produces the LLM summary (reusing an existing transcript if there is one).
 export type AnalyzeStage = "transcript" | "summary";
+// "simple" = concise summary; "detailed" = rich, with verbatim quotes.
+export type SummaryDetail = "simple" | "detailed";
 
 export async function analyzeTranscript(
   id: string,
   stage: AnalyzeStage = "summary",
   diarize = true,
+  detail: SummaryDetail = "detailed",
 ): Promise<void> {
   const res = await fetch(
-    `${API_BASE}/api/transcripts/${id}/analyze?stage=${stage}&diarize=${diarize}`,
+    `${API_BASE}/api/transcripts/${id}/analyze` +
+      `?stage=${stage}&diarize=${diarize}&detail=${detail}`,
     { method: "POST" },
   );
   if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.detail || `${res.status} ${res.statusText}`);
   }
 }
 

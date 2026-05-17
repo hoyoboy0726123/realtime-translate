@@ -20,7 +20,10 @@ from .translate import translate_utterances
 
 
 def analyze_session(
-    session_id: str, stage: str = "summary", diarize: bool = True,
+    session_id: str,
+    stage: str = "summary",
+    diarize: bool = True,
+    summary_detail: str = "detailed",
 ) -> None:
     """Run the analysis pipeline for one recorded or uploaded session.
 
@@ -32,6 +35,8 @@ def analyze_session(
 
     `diarize` — when False, skip speaker diarization and just transcribe the
     whole file (faster; utterances carry no speaker label).
+
+    `summary_detail` — "simple" or "detailed" (controls the summary prompt).
     """
     session = db.get_session(session_id)
     if session is None or not session.get("audio_path"):
@@ -79,7 +84,7 @@ def analyze_session(
 
         # 3. summarize — feed the lang_a column to the LLM
         db.set_process_status(session_id, "summarizing")
-        summary = summarize(diarized, "text_a", local.summary_model)
+        summary = summarize(diarized, "text_a", local.summary_model, summary_detail)
         if settings.chinese_variant == "traditional" and "zh" in (lang_a, lang_b):
             import opencc
             summary = opencc.OpenCC("s2twp").convert(summary)

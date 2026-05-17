@@ -59,6 +59,7 @@ def _start_analysis(
     session_id: str,
     stage: str = "summary",
     diarize: bool = True,
+    summary_detail: str = "detailed",
     *,
     prior_status: str | None = None,
     had_transcript: bool = False,
@@ -70,7 +71,8 @@ def _start_analysis(
     Must be called from within the running event loop."""
     global _current
     proc = _mp.Process(
-        target=analyze_session, args=(session_id, stage, diarize),
+        target=analyze_session,
+        args=(session_id, stage, diarize, summary_detail),
     )
     proc.start()
     _current = {
@@ -139,7 +141,10 @@ async def get_audio(session_id: str):
 
 @router.post("/{session_id}/analyze")
 async def analyze(
-    session_id: str, stage: str = "summary", diarize: bool = True,
+    session_id: str,
+    stage: str = "summary",
+    diarize: bool = True,
+    detail: str = "detailed",
 ) -> dict:
     """Start post-session analysis. Each stage is usable on its own:
 
@@ -147,12 +152,15 @@ async def analyze(
       stage=summary    — also the LLM summary; reuses an existing transcript.
 
     `diarize=false` skips speaker identification (faster, no speaker labels).
+    `detail` is "simple" or "detailed" — controls the summary depth.
 
     Runs in the background; poll GET /{session_id} for `process_status` —
     `diarizing` -> `translating` -> `summarizing` -> `done` (or `failed`).
     """
     if stage not in ("transcript", "summary"):
         stage = "summary"
+    if detail not in ("simple", "detailed"):
+        detail = "detailed"
     session = await asyncio.to_thread(db.get_session, session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
@@ -173,7 +181,7 @@ async def analyze(
     # Run the heavy pipeline in a separate process — the backend stays
     # responsive while it runs.
     _start_analysis(
-        session_id, stage, diarize,
+        session_id, stage, diarize, detail,
         prior_status=prior_status, had_transcript=has_transcript,
     )
     return {"status": initial}
@@ -335,7 +343,8 @@ async def export_srt(session_id: str, track: str = "both") -> PlainTextResponse:
 @router.get("/{session_id}/export.txt", response_class=PlainTextResponse)
 async def export_txt(session_id: str, track: str = "both") -> PlainTextResponse:
     """Plain-text transcript of the analysed session — one utterance per block,
-    no timestamps. `track`: `both`, `a`, or `b`. Requires analysis first.
+    no timestamps. Speaker labels are shown whenever the speaker changes (when
+    diarization was used). `track`: `both`, `a`, or `b`. Requires analysis.
     """
     session = await asyncio.to_thread(db.get_session, session_id)
     if session is None:
@@ -347,6 +356,7 @@ async def export_txt(session_id: str, track: str = "both") -> PlainTextResponse:
         track = "both"
 
     blocks: list[str] = []
+    prev_speaker = None
     for d in diar:
         if track == "a":
             lines = [d["text_a"]]
@@ -355,8 +365,14 @@ async def export_txt(session_id: str, track: str = "both") -> PlainTextResponse:
         else:
             lines = [d["text_a"], d["text_b"]]
         lines = [ln.strip() for ln in lines if ln and ln.strip()]
-        if lines:
-            blocks.append("\n".join(lines))
+        if not lines:
+            continue
+        block = "\n".join(lines)
+        speaker = d.get("speaker") or ""
+        if speaker and speaker != prev_speaker:
+            block = f"{speaker}：\n{block}"  # header only when the speaker changes
+        prev_speaker = speaker
+        blocks.append(block)
 
     body = "\n\n".join(blocks) + "\n" if blocks else ""
     return PlainTextResponse(

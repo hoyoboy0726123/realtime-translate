@@ -13,6 +13,7 @@ import {
   type AnalyzeStage,
   type SessionDetail,
   type SessionSummary,
+  type SummaryDetail,
 } from "@/lib/api";
 
 const fmt = (ms: number) => new Date(ms).toLocaleString();
@@ -49,6 +50,7 @@ export default function TranscribePage() {
   const [uploading, setUploading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [identifySpeakers, setIdentifySpeakers] = useState(false);
+  const [summaryDetail, setSummaryDetail] = useState<SummaryDetail>("detailed");
   const [recFilter, setRecFilter] = useState("");
   const startRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -119,13 +121,13 @@ export default function TranscribePage() {
       if (!detail) return;
       setErr(null);
       try {
-        await analyzeTranscript(detail.id, stage, identifySpeakers);
+        await analyzeTranscript(detail.id, stage, identifySpeakers, summaryDetail);
         setDetail(await getTranscript(detail.id));
       } catch (e) {
         setErr(`無法開始：${(e as Error).message}`);
       }
     },
-    [detail, identifySpeakers],
+    [detail, identifySpeakers, summaryDetail],
   );
 
   const runCancel = useCallback(async () => {
@@ -211,6 +213,8 @@ export default function TranscribePage() {
           runCancel={runCancel}
           identifySpeakers={identifySpeakers}
           setIdentifySpeakers={setIdentifySpeakers}
+          summaryDetail={summaryDetail}
+          setSummaryDetail={setSummaryDetail}
         />
       )}
 
@@ -311,6 +315,8 @@ function FileWorkflow({
   runCancel,
   identifySpeakers,
   setIdentifySpeakers,
+  summaryDetail,
+  setSummaryDetail,
 }: {
   detail: SessionDetail;
   elapsed: number;
@@ -318,6 +324,8 @@ function FileWorkflow({
   runCancel: () => void;
   identifySpeakers: boolean;
   setIdentifySpeakers: (v: boolean) => void;
+  summaryDetail: SummaryDetail;
+  setSummaryDetail: (v: SummaryDetail) => void;
 }) {
   const status = detail.process_status;
   const processing = isProcessing(status);
@@ -421,6 +429,33 @@ function FileWorkflow({
         <p className="sub" style={{ marginTop: 0 }}>
           以本機 LLM 產生摘要。可單獨執行 —— 若尚未轉錄會自動先完成轉錄。
         </p>
+        <div style={{ display: "flex", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+          {(
+            [
+              { v: "detailed", label: "詳細（重點含說明，並引述原文）" },
+              { v: "simple", label: "簡單（精簡條列）" },
+            ] as { v: SummaryDetail; label: string }[]
+          ).map((o) => (
+            <label
+              key={o.v}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                cursor: processing ? "default" : "pointer",
+              }}
+            >
+              <input
+                type="radio"
+                name="summary-detail"
+                checked={summaryDetail === o.v}
+                disabled={processing}
+                onChange={() => setSummaryDetail(o.v)}
+              />
+              <span>{o.label}</span>
+            </label>
+          ))}
+        </div>
         <button onClick={() => runStage("summary")} disabled={processing}>
           {hasSummary ? "重新產生摘要" : "產生摘要"}
         </button>

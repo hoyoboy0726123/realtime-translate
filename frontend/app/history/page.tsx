@@ -33,7 +33,9 @@ const STAGES = [
   { key: "translating", label: "翻譯" },
   { key: "summarizing", label: "產生摘要" },
 ];
-const PROCESSING = ["processing", "diarizing", "translating", "summarizing"];
+const PROCESSING = [
+  "processing", "downloading", "diarizing", "translating", "summarizing",
+];
 const isProcessing = (s: string | null | undefined) => PROCESSING.includes(s ?? "");
 const stageIndex = (s: string | null | undefined) => {
   const i = STAGES.findIndex((st) => st.key === s);
@@ -142,6 +144,16 @@ export default function HistoryPage() {
           <h2 style={{ marginTop: 0 }}>錄音分析</h2>
           {!detail.audio_path ? (
             <p className="sub">此記錄沒有錄音檔（在錄音功能加入前建立），無法分析。</p>
+          ) : status === "downloading" ? (
+            <div>
+              <p className="sub">
+                ⬇ 首次使用，正在下載所需模型…（語音辨識／翻譯／摘要模型，合計約數 GB，
+                只需下載一次；詳細進度可在後端終端機查看）　已 {clock(elapsed * 1000)}
+              </p>
+              <button className="stop" style={{ marginTop: 10 }} onClick={cancelAnalyze}>
+                停止
+              </button>
+            </div>
           ) : isProcessing(status) ? (
             <div>
               <p className="sub">分析中… 已 {clock(elapsed * 1000)}（離線重新轉錄＋摘要，約需數分鐘）</p>

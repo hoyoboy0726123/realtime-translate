@@ -200,5 +200,5 @@ def reset_stuck_processing() -> None:
         conn.execute(
             "UPDATE sessions SET process_status = 'failed' "
             "WHERE process_status IN "
-            "('processing', 'diarizing', 'translating', 'summarizing')"
+            "('processing', 'downloading', 'diarizing', 'translating', 'summarizing')"
         )

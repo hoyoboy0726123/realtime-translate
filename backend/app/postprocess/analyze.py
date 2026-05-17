@@ -50,10 +50,29 @@ def analyze_session(
 
     try:
         diarized = session.get("diarized") or []
+        # Whether this run needs to (re-)build the transcript, or just the
+        # summary on top of an existing one.
+        need_transcribe = not (stage == "summary" and diarized)
+        want_summary = stage == "summary"
+
+        # Pre-flight: download any missing models first, as a visible
+        # "downloading" phase — so a first run does not just appear to hang.
+        from .. import models
+        absent = models.missing(
+            settings, asr_=need_transcribe, nllb=need_transcribe,
+            llm_=want_summary, sherpa=(need_transcribe and diarize),
+        )
+        if absent:
+            logging.info(f"[analyze] {session_id}: downloading models: {absent}")
+            db.set_process_status(session_id, "downloading")
+            models.ensure(
+                settings, asr_=need_transcribe, nllb=need_transcribe,
+                llm_=want_summary, sherpa=(need_transcribe and diarize),
+            )
 
         # 1+2. diarize + transcribe + translate — unless a transcript already
         # exists and we were only asked for the summary.
-        if not (stage == "summary" and diarized):
+        if need_transcribe:
             # 1. transcribe (full large-v3 — accuracy over speed), with or
             #    without speaker diarization.
             db.set_process_status(session_id, "diarizing")

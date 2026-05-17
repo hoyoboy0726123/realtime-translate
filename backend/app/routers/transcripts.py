@@ -20,7 +20,7 @@ from ..postprocess.analyze import analyze_session
 router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
 
 # process_status values that mean analysis is still running.
-_PROCESSING = {"processing", "diarizing", "translating", "summarizing"}
+_PROCESSING = {"processing", "downloading", "diarizing", "translating", "summarizing"}
 
 # The analysis pipeline is heavy (Whisper + NLLB + a 7B LLM). Each run gets its
 # own process, so its compute never starves the backend's event loop, its

@@ -228,15 +228,10 @@ the `cu124` wheel shown below. In short: **use the `cu124` wheel on any CUDA
 
 **Both platforms:**
 
-- First use auto-downloads the models (Whisper, NLLB ≈ 2.4 GB, Qwen2.5-7B ≈ 4–5 GB).
-- **Speaker-diarization models must be downloaded manually** into
-  `backend/data/diarization/`:
-  ```bash
-  cd backend/data/diarization
-  curl -L -o seg.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-  tar xjf seg.tar.bz2 && rm seg.tar.bz2
-  curl -L -o emb.onnx "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
-  ```
+- Every model the analysis needs is downloaded automatically the first time —
+  Whisper, NLLB (≈ 2.4 GB), Qwen2.5-7B (≈ 4–5 GB) and the speaker-diarization
+  models. The UI shows a **"downloading models"** phase while this happens; it
+  only runs once, then the models are cached.
 - Force a backend with env var `TRANSLATE_LOCAL_BACKEND=mlx` (Apple) or `ct2`
   (faster-whisper / llama.cpp).
 - `transformers` is pinned to **4.44.x** — newer releases require torch ≥ 2.4,
@@ -515,14 +510,9 @@ CTranslate2 只要求 ≥ 12.3，而靠 CUDA 的次版本相容性，`cu124` 的
 
 **兩平台共通：**
 
-- 首次使用會自動下載模型（Whisper、NLLB ≈ 2.4 GB、Qwen2.5-7B ≈ 4–5 GB）。
-- **講者辨識模型需手動下載**到 `backend/data/diarization/`：
-  ```bash
-  cd backend/data/diarization
-  curl -L -o seg.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-  tar xjf seg.tar.bz2 && rm seg.tar.bz2
-  curl -L -o emb.onnx "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
-  ```
+- 分析所需的模型全部會在首次使用時自動下載 —— Whisper、NLLB（≈ 2.4 GB）、
+  Qwen2.5-7B（≈ 4–5 GB）以及講者辨識模型。下載期間介面會顯示**「下載模型」**
+  階段；只會執行一次，之後即快取於本機。
 - 強制指定後端：環境變數 `TRANSLATE_LOCAL_BACKEND=mlx`（Apple）或 `ct2`
   （faster-whisper / llama.cpp）。
 - `transformers` 鎖定在 **4.44.x** —— 更新版需要 torch ≥ 2.4，而本專案的 torch

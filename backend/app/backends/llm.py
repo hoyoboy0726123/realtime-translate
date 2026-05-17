@@ -69,8 +69,10 @@ def chat(messages: list[dict], model: str, max_tokens: int = 2000) -> str:
         key = (repo, fname)
         if key not in _gguf_models:
             logging.info(f"[llm] loading GGUF model: {repo}/{fname}")
+            # n_ctx must hold the transcript (or, for long ones, the combined
+            # chunk summaries) plus the generated summary — see summarize.py.
             _gguf_models[key] = Llama.from_pretrained(
-                repo_id=repo, filename=fname, n_ctx=8192, verbose=False,
+                repo_id=repo, filename=fname, n_ctx=16384, verbose=False,
             )
         out = _gguf_models[key].create_chat_completion(
             messages=messages, max_tokens=max_tokens, temperature=0.7,

@@ -445,8 +445,16 @@ function FileWorkflow({
                 href: `${API_BASE}/api/transcripts/${detail.id}/export.srt?track=b`,
               },
               {
-                label: "逐字稿（txt）",
+                label: "逐字稿（雙語）",
                 href: `${API_BASE}/api/transcripts/${detail.id}/export.txt?track=both`,
+              },
+              {
+                label: `逐字稿（${detail.lang_a}）`,
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.txt?track=a`,
+              },
+              {
+                label: `逐字稿（${detail.lang_b}）`,
+                href: `${API_BASE}/api/transcripts/${detail.id}/export.txt?track=b`,
               },
             ].map((o) => (
               <a key={o.label} href={o.href} target="_blank" rel="noreferrer">

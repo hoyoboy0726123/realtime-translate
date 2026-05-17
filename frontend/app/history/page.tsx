@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   API_BASE,
   analyzeTranscript,
+  cancelAnalysis,
   deleteTranscript,
   getTranscript,
   getTranscripts,
@@ -105,6 +106,16 @@ export default function HistoryPage() {
     }
   }, [detail]);
 
+  const cancelAnalyze = useCallback(async () => {
+    if (!detail) return;
+    try {
+      await cancelAnalysis(detail.id);
+      setDetail(await getTranscript(detail.id));
+    } catch (e) {
+      setErr(`無法停止分析：${(e as Error).message}`);
+    }
+  }, [detail]);
+
   if (detail) {
     const status = detail.process_status;
     const cur = stageIndex(status);
@@ -169,6 +180,9 @@ export default function HistoryPage() {
                   );
                 })}
               </div>
+              <button className="stop" style={{ marginTop: 10 }} onClick={cancelAnalyze}>
+                停止
+              </button>
             </div>
           ) : status === "failed" ? (
             <div>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   API_BASE,
   analyzeTranscript,
+  cancelAnalysis,
   deleteTranscript,
   getTranscript,
   getTranscripts,
@@ -127,6 +128,17 @@ export default function TranscribePage() {
     [detail, identifySpeakers],
   );
 
+  const runCancel = useCallback(async () => {
+    if (!detail) return;
+    setErr(null);
+    try {
+      await cancelAnalysis(detail.id);
+      setDetail(await getTranscript(detail.id));
+    } catch (e) {
+      setErr(`無法停止：${(e as Error).message}`);
+    }
+  }, [detail]);
+
   const remove = useCallback(
     async (id: string) => {
       await deleteTranscript(id);
@@ -196,6 +208,7 @@ export default function TranscribePage() {
           detail={detail}
           elapsed={elapsed}
           runStage={runStage}
+          runCancel={runCancel}
           identifySpeakers={identifySpeakers}
           setIdentifySpeakers={setIdentifySpeakers}
         />
@@ -295,12 +308,14 @@ function FileWorkflow({
   detail,
   elapsed,
   runStage,
+  runCancel,
   identifySpeakers,
   setIdentifySpeakers,
 }: {
   detail: SessionDetail;
   elapsed: number;
   runStage: (stage: AnalyzeStage) => void;
+  runCancel: () => void;
   identifySpeakers: boolean;
   setIdentifySpeakers: (v: boolean) => void;
 }) {
@@ -358,6 +373,9 @@ function FileWorkflow({
               );
             })}
           </div>
+          <button className="stop" style={{ marginTop: 10 }} onClick={runCancel}>
+            停止
+          </button>
         </div>
       )}
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import multiprocessing
 import os
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import ProcessPoolExecutor
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -22,51 +22,64 @@ router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
 # process_status values that mean analysis is still running.
 _PROCESSING = {"processing", "diarizing", "translating", "summarizing"}
 
-# The analysis pipeline is heavy (Whisper + NLLB + a 7B LLM). It runs in a
-# separate *process* so its compute never starves the backend's event loop or
-# blocks live translation. One worker — analyses run one at a time.
-#
-# `max_tasks_per_child=1`: the worker is torn down after every analysis, so the
-# Whisper/NLLB/LLM models it loaded are fully released. Without this the worker
-# is reused and memory from each run accumulates until it is OOM-killed mid-run.
-_analyze_pool: ProcessPoolExecutor | None = None
+# The analysis pipeline is heavy (Whisper + NLLB + a 7B LLM). Each run gets its
+# own process, so its compute never starves the backend's event loop, its
+# models are fully released when it exits, and — crucially — it can be
+# force-stopped midway. Only one analysis runs at a time.
+_mp = multiprocessing.get_context("spawn")
+_current: dict | None = None    # the running analysis: {"session_id", "process"}
+_cancelled: set[str] = set()    # sessions whose run was deliberately stopped
 
 
-def _pool() -> ProcessPoolExecutor:
-    global _analyze_pool
-    if _analyze_pool is None:
-        _analyze_pool = ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1)
-    return _analyze_pool
+def _analysis_running() -> bool:
+    return _current is not None and _current["process"].is_alive()
 
 
-def _on_analyze_done(session_id: str, future) -> None:
-    """If the analysis worker crashed, the future carries the exception that
-    `analyze_session`'s own try/except never saw — mark the session failed so
-    it does not sit stuck on `diarizing` forever, and drop the broken pool."""
-    global _analyze_pool
-    try:
-        exc = future.exception()
-    except Exception:  # cancelled
-        exc = None
-    if exc is not None:
-        logging.error(f"[analyze] {session_id}: worker crashed: {exc!r}")
-        try:
-            db.set_process_status(session_id, "failed")
-        except Exception as db_exc:  # noqa: BLE001
-            logging.error(f"[analyze] {session_id}: could not mark failed: {db_exc!r}")
-        _analyze_pool = None  # a crashed worker breaks the whole pool
+async def _watch(session_id: str, proc) -> None:
+    """Wait for the analysis process; if it crashed, flag the session failed."""
+    global _current
+    await asyncio.get_running_loop().run_in_executor(None, proc.join)
+    if _current is not None and _current["session_id"] == session_id:
+        _current = None
+    if session_id in _cancelled:
+        _cancelled.discard(session_id)
+        return  # the cancel handler already cleaned up after this run
+    if proc.exitcode not in (0, None):
+        # The process died without `analyze_session`'s own try/except running
+        # (a hard crash) — don't let the session sit stuck on "diarizing".
+        logging.error(
+            f"[analyze] {session_id}: process crashed (exit {proc.exitcode})"
+        )
+        session = await asyncio.to_thread(db.get_session, session_id)
+        if session and session.get("process_status") in _PROCESSING:
+            await asyncio.to_thread(db.set_process_status, session_id, "failed")
 
 
 def _start_analysis(
-    session_id: str, stage: str = "summary", diarize: bool = True,
+    session_id: str,
+    stage: str = "summary",
+    diarize: bool = True,
+    *,
+    prior_status: str | None = None,
+    had_transcript: bool = False,
 ) -> None:
-    """Kick off the analysis pipeline in the worker process (fire-and-forget).
+    """Spawn the analysis pipeline in its own process and watch it finish.
 
+    `prior_status` / `had_transcript` snapshot the session's state before this
+    run, so a cancel can restore it instead of discarding a valid transcript.
     Must be called from within the running event loop."""
-    future = asyncio.get_running_loop().run_in_executor(
-        _pool(), analyze_session, session_id, stage, diarize,
+    global _current
+    proc = _mp.Process(
+        target=analyze_session, args=(session_id, stage, diarize),
     )
-    future.add_done_callback(lambda f: _on_analyze_done(session_id, f))
+    proc.start()
+    _current = {
+        "session_id": session_id,
+        "process": proc,
+        "prior_status": prior_status,
+        "had_transcript": had_transcript,
+    }
+    asyncio.create_task(_watch(session_id, proc))
 
 
 def _fmt_ts(ms: int) -> str:
@@ -148,16 +161,63 @@ async def analyze(
         raise HTTPException(400, "No recording available for this session")
     if session.get("process_status") in _PROCESSING:
         return {"status": session["process_status"]}
+    if _analysis_running():
+        raise HTTPException(409, "另一個分析正在進行中，請待其完成或先停止它")
 
     # If we only need the summary and a transcript already exists, the run
     # skips straight to the summary step — reflect that in the initial status.
+    prior_status = session.get("process_status")
     has_transcript = bool(session.get("diarized"))
     initial = "summarizing" if (stage == "summary" and has_transcript) else "diarizing"
     await asyncio.to_thread(db.set_process_status, session_id, initial)
     # Run the heavy pipeline in a separate process — the backend stays
     # responsive while it runs.
-    _start_analysis(session_id, stage, diarize)
+    _start_analysis(
+        session_id, stage, diarize,
+        prior_status=prior_status, had_transcript=has_transcript,
+    )
     return {"status": initial}
+
+
+@router.post("/{session_id}/cancel")
+async def cancel_analysis(session_id: str) -> dict:
+    """Stop an in-progress analysis and discard its partial results.
+
+    Force-kills the analysis process, removes any partial diarized transcript
+    written so far, and resets the session to "not analysed".
+    """
+    global _current
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    if session.get("process_status") not in _PROCESSING:
+        return {"status": session.get("process_status")}
+
+    # Mark it so `_watch` knows this exit was a deliberate stop, not a crash.
+    _cancelled.add(session_id)
+
+    run = _current if (_current and _current["session_id"] == session_id) else None
+    if run is not None:
+        proc = run["process"]
+        if proc.is_alive():
+            proc.terminate()
+            await asyncio.to_thread(proc.join, 5)
+            if proc.is_alive():  # didn't stop gracefully — force it
+                proc.kill()
+                await asyncio.to_thread(proc.join)
+        _current = None
+
+    # A run that started from an existing transcript (summary-only) kept that
+    # transcript valid — restore it. Otherwise the transcript was being built
+    # and is incomplete: drop it and reset the session to "not analysed".
+    if run is not None and run["had_transcript"]:
+        await asyncio.to_thread(
+            db.set_process_status, session_id, run["prior_status"] or "done",
+        )
+    else:
+        await asyncio.to_thread(db.save_diarized, session_id, [])
+        await asyncio.to_thread(db.set_process_status, session_id, None)
+    return {"status": "cancelled"}
 
 
 @router.post("/upload")

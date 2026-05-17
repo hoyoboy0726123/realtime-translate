@@ -119,6 +119,18 @@ export async function analyzeTranscript(
   }
 }
 
+// Stop an in-progress analysis; its partial transcript is discarded and the
+// session is reset (a summary-only run keeps its existing transcript).
+export async function cancelAnalysis(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/transcripts/${id}/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
+}
+
 // Upload an arbitrary audio/video file; it becomes a session and is analysed
 // with the same diarize -> translate -> summarize pipeline as a recording.
 export async function uploadMedia(

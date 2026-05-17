@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 
@@ -20,14 +21,36 @@ _PROCESSING = {"processing", "diarizing", "translating", "summarizing"}
 # The analysis pipeline is heavy (Whisper + NLLB + a 7B LLM). It runs in a
 # separate *process* so its compute never starves the backend's event loop or
 # blocks live translation. One worker — analyses run one at a time.
+#
+# `max_tasks_per_child=1`: the worker is torn down after every analysis, so the
+# Whisper/NLLB/LLM models it loaded are fully released. Without this the worker
+# is reused and memory from each run accumulates until it is OOM-killed mid-run.
 _analyze_pool: ProcessPoolExecutor | None = None
 
 
 def _pool() -> ProcessPoolExecutor:
     global _analyze_pool
     if _analyze_pool is None:
-        _analyze_pool = ProcessPoolExecutor(max_workers=1)
+        _analyze_pool = ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1)
     return _analyze_pool
+
+
+def _on_analyze_done(session_id: str, future) -> None:
+    """If the analysis worker crashed, the future carries the exception that
+    `analyze_session`'s own try/except never saw — mark the session failed so
+    it does not sit stuck on `diarizing` forever, and drop the broken pool."""
+    global _analyze_pool
+    try:
+        exc = future.exception()
+    except Exception:  # cancelled
+        exc = None
+    if exc is not None:
+        logging.error(f"[analyze] {session_id}: worker crashed: {exc!r}")
+        try:
+            db.set_process_status(session_id, "failed")
+        except Exception as db_exc:  # noqa: BLE001
+            logging.error(f"[analyze] {session_id}: could not mark failed: {db_exc!r}")
+        _analyze_pool = None  # a crashed worker breaks the whole pool
 
 
 def _fmt_ts(ms: int) -> str:
@@ -77,9 +100,13 @@ async def analyze(session_id: str) -> dict:
         return {"status": session["process_status"]}
 
     await asyncio.to_thread(db.set_process_status, session_id, "diarizing")
-    # Run the heavy pipeline in a separate process, fire-and-forget — the
-    # backend stays responsive while it runs.
-    asyncio.get_running_loop().run_in_executor(_pool(), analyze_session, session_id)
+    # Run the heavy pipeline in a separate process — the backend stays
+    # responsive while it runs. We don't await the future, but we do attach a
+    # done-callback so a worker crash still flips the session to `failed`.
+    future = asyncio.get_running_loop().run_in_executor(
+        _pool(), analyze_session, session_id,
+    )
+    future.add_done_callback(lambda f: _on_analyze_done(session_id, f))
     return {"status": "diarizing"}
 
 

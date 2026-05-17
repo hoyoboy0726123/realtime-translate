@@ -18,7 +18,11 @@ from ..backends import asr
 from ..config import DATA_DIR
 
 _DIAR_DIR = DATA_DIR / "diarization"
-_SEG_MODEL = _DIAR_DIR / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx"
+# Use the int8 segmentation model: the fp32 `model.onnx` triggers a SIGBUS
+# inside sherpa-onnx's pyannote path on Apple Silicon for audio longer than
+# ~10 s. The int8 model runs the full recording reliably (and faster), with
+# negligible difference in segmentation quality.
+_SEG_MODEL = _DIAR_DIR / "sherpa-onnx-pyannote-segmentation-3-0" / "model.int8.onnx"
 _EMB_MODEL = _DIAR_DIR / "emb.onnx"
 
 # Diarization turns shorter than this are skipped (too little to transcribe).

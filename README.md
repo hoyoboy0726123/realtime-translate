@@ -77,6 +77,13 @@ virtualenv with **Python 3.11**.
 the **local engine** is the demanding part (Whisper + NLLB + a 7B LLM).
 Reference machine, verified: **MacBook Pro M4 Pro · 12-core · 24 GB RAM**.
 
+**About the 7B LLM.** The meeting-summary model is **Qwen2.5-7B-Instruct,
+4-bit quantised** (≈ 4–5 GB) — the largest single model in the project. It is
+loaded **only** by the offline *recording analysis* (the meeting summary);
+live translation never loads it. So the figures below are sized for the full
+analysis pipeline, where Whisper + NLLB + this LLM are used in one session — if
+you only need live subtitles, the requirements are noticeably lighter.
+
 *macOS — Apple Silicon*
 
 | Use case                 | Minimum                        | Recommended                                            |
@@ -368,6 +375,11 @@ realtime-translate/
 **建議硬體規格。** `cloud` 與 `mock` 引擎幾乎什麼機器都能跑；**地端引擎**才是吃資源的
 部分（要同時跑 Whisper + NLLB + 7B LLM）。實測基準機：
 **MacBook Pro M4 Pro · 12 核 · 24 GB RAM**。
+
+**關於 7B LLM。** 會議摘要使用的模型是 **Qwen2.5-7B-Instruct（4-bit 量化）**
+（約 4–5 GB），是本專案中最大的單一模型。它**只**會被離線的「錄音分析」（會議
+摘要）載入；即時翻譯完全不會用到。因此下方規格是以完整分析流程為準 —— Whisper +
+NLLB + 此 LLM 會在同一次工作中使用；若你只需要即時字幕，需求會明顯較低。
 
 *macOS — Apple Silicon*
 

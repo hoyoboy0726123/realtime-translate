@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import SummaryView from "@/components/SummaryView";
 import {
   API_BASE,
   analyzeTranscript,
@@ -219,9 +220,7 @@ export default function HistoryPage() {
         {detail.summary && (
           <div className="card">
             <h2 style={{ marginTop: 0 }}>會議摘要</h2>
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-              {detail.summary}
-            </div>
+            <SummaryView sessionId={detail.id} summary={detail.summary} />
           </div>
         )}
 

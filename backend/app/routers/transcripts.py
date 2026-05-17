@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from .. import db
 from ..config import RECORDINGS_DIR, SAMPLE_RATE
@@ -379,6 +379,43 @@ async def export_txt(session_id: str, track: str = "both") -> PlainTextResponse:
         body,
         media_type="text/plain",
         headers={"Content-Disposition": f'attachment; filename="{session_id}.txt"'},
+    )
+
+
+@router.get("/{session_id}/summary.md", response_class=PlainTextResponse)
+async def export_summary_md(session_id: str) -> PlainTextResponse:
+    """The meeting summary as a Markdown file."""
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    summary = session.get("summary")
+    if not summary:
+        raise HTTPException(400, "尚未產生摘要")
+    return PlainTextResponse(
+        summary.rstrip() + "\n",
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.md"'},
+    )
+
+
+@router.get("/{session_id}/summary.docx")
+async def export_summary_docx(session_id: str) -> Response:
+    """The meeting summary as a Word .docx report."""
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    summary = session.get("summary")
+    if not summary:
+        raise HTTPException(400, "尚未產生摘要")
+    from ..docx_export import summary_to_docx
+    data = await asyncio.to_thread(summary_to_docx, session["name"], summary)
+    return Response(
+        content=data,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.docx"'},
     )
 
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import SummaryView from "@/components/SummaryView";
 import {
   API_BASE,
   analyzeTranscript,
@@ -517,7 +518,7 @@ function FileWorkflow({
       {hasSummary && (
         <div className="card" style={{ marginBottom: 14 }}>
           <h3 style={{ marginTop: 0 }}>會議摘要</h3>
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{detail.summary}</div>
+          <SummaryView sessionId={detail.id} summary={detail.summary as string} />
         </div>
       )}
 

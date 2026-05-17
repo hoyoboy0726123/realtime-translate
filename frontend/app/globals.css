@@ -389,3 +389,37 @@ button.stop {
 .seg .seg-b {
   color: var(--accent-b);
 }
+
+/* Rendered markdown — meeting summary. */
+.markdown {
+  line-height: 1.7;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 1em 0 0.4em;
+  line-height: 1.3;
+}
+.markdown h1 { font-size: 1.4rem; }
+.markdown h2 { font-size: 1.2rem; color: var(--accent-b); }
+.markdown h3 { font-size: 1.05rem; }
+.markdown h4 { font-size: 1rem; color: var(--muted); }
+.markdown :first-child { margin-top: 0; }
+.markdown p { margin: 0.5em 0; }
+.markdown ul,
+.markdown ol { margin: 0.5em 0; padding-left: 1.5em; }
+.markdown li { margin: 0.25em 0; }
+.markdown strong { color: var(--text); }
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.7em 0;
+  width: 100%;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.markdown th { background: var(--panel); }

@@ -82,6 +82,31 @@ async def translate(websocket: WebSocket) -> None:
     queue: asyncio.Queue[TranslationEvent] = asyncio.Queue()
     engine = create_engine(settings, queue)
 
+    # Local engine: its Whisper/NLLB models download on first use. Fetch them
+    # before starting, telling the client, so the first run doesn't just hang.
+    if settings.engine == "local":
+        from . import models
+        try:
+            absent = await asyncio.to_thread(
+                models.missing, settings,
+                asr_=True, nllb=True, llm_=False, sherpa=False, live=True,
+            )
+        except Exception:  # noqa: BLE001
+            absent = []
+        if absent:
+            await websocket.send_json({"type": "downloading", "models": absent})
+            try:
+                await asyncio.to_thread(
+                    models.ensure, settings,
+                    asr_=True, nllb=True, llm_=False, sherpa=False, live=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                await websocket.send_json(
+                    {"type": "error", "message": f"模型下載失敗：{exc}"})
+                await asyncio.to_thread(db.end_session, session_id)
+                await websocket.close()
+                return
+
     try:
         await engine.open()
     except Exception as exc:  # noqa: BLE001 - surface any engine startup failure to the client

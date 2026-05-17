@@ -44,17 +44,36 @@ def _cached_hf_repos() -> set[str]:
         return set()
 
 
-def _needed(settings, *, asr_: bool, nllb: bool, llm_: bool) -> list[tuple]:
+def _whisper_repo(model_name: str) -> str | None:
+    """HF repo id for a Whisper model on the active ASR backend.
+
+    Returns None when it can't be resolved (an unknown faster-whisper name) —
+    the caller then just skips the pre-check and lets the backend download it.
+    """
+    if asr.backend() == "mlx":
+        return model_name  # an mlx model name is its HF repo id
+    fw = _fw_name(model_name)
+    try:  # the authoritative name -> repo map lives inside faster-whisper
+        from faster_whisper.utils import _MODELS
+        return _MODELS.get(fw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _needed(
+    settings, *, asr_: bool, nllb: bool, llm_: bool, live: bool = False,
+) -> list[tuple]:
     """Models a run needs, as (label, repo, filename | None).
 
     filename None → a whole HF repo; filename set → a single file in a repo.
+    `live` picks the live-subtitle Whisper model instead of the analysis one.
     """
     local = settings.local
     items: list[tuple] = []
     if asr_:
-        repo = (local.analyze_whisper_model if asr.backend() == "mlx"
-                else f"Systran/faster-whisper-{_fw_name(local.analyze_whisper_model)}")
-        items.append(("語音辨識模型 Whisper", repo, None))
+        repo = _whisper_repo(local.whisper_model if live else local.analyze_whisper_model)
+        if repo:
+            items.append(("語音辨識模型 Whisper", repo, None))
     if nllb:
         items.append(("翻譯模型 NLLB", local.translate_model, None))
     if llm_:
@@ -70,11 +89,16 @@ def _diarization_present() -> bool:
     return _EMB_MODEL.exists() and _SEG_MODEL.exists()
 
 
-def missing(settings, *, asr_: bool, nllb: bool, llm_: bool, sherpa: bool) -> list[str]:
+def missing(
+    settings, *, asr_: bool, nllb: bool, llm_: bool, sherpa: bool, live: bool = False,
+) -> list[str]:
     """Human-readable names of the models a run needs that are not downloaded."""
     cached = _cached_hf_repos()
-    names = [label for label, repo, _ in _needed(settings, asr_=asr_, nllb=nllb, llm_=llm_)
-             if repo not in cached]
+    names = [
+        label for label, repo, _ in
+        _needed(settings, asr_=asr_, nllb=nllb, llm_=llm_, live=live)
+        if repo not in cached
+    ]
     if sherpa and not _diarization_present():
         names.append("講者辨識模型 sherpa-onnx")
     return names
@@ -98,12 +122,14 @@ def _download_diarization() -> None:
             os.unlink(tmp.name)
 
 
-def ensure(settings, *, asr_: bool, nllb: bool, llm_: bool, sherpa: bool) -> None:
+def ensure(
+    settings, *, asr_: bool, nllb: bool, llm_: bool, sherpa: bool, live: bool = False,
+) -> None:
     """Download whatever the run needs that is missing. Idempotent — anything
     already cached is skipped, so this is cheap to call every run."""
     from huggingface_hub import hf_hub_download, snapshot_download
 
-    for label, repo, fname in _needed(settings, asr_=asr_, nllb=nllb, llm_=llm_):
+    for label, repo, fname in _needed(settings, asr_=asr_, nllb=nllb, llm_=llm_, live=live):
         logging.info(f"[models] ensuring {label} ({repo})")
         if fname:  # a single file (e.g. one GGUF quant) — don't pull the whole repo
             hf_hub_download(repo, fname)

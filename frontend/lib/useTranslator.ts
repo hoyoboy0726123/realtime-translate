@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { WS_BASE } from "./api";
 
-export type Status = "idle" | "connecting" | "live" | "error";
+export type Status = "idle" | "connecting" | "downloading" | "live" | "error";
 
 export interface LiveSegment {
   id: string;
@@ -106,6 +106,9 @@ export function useTranslator() {
             setStatus("error");
             ws.close();
           }
+        } else if (msg.type === "downloading") {
+          // First use: the backend is fetching the local-engine models.
+          setStatus("downloading");
         } else if (msg.type === "segment") {
           setSegments((prev) => {
             const seg: LiveSegment = {

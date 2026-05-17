@@ -9,6 +9,7 @@ import { useTranslator } from "@/lib/useTranslator";
 const STATUS_TEXT: Record<string, string> = {
   idle: "未連線",
   connecting: "連線中…",
+  downloading: "下載模型中…",
   live: "即時翻譯中",
   error: "錯誤",
 };
@@ -49,7 +50,8 @@ export default function Home() {
     return l ? `${l.native} · ${l.name}` : code;
   };
 
-  const busy = status === "live" || status === "connecting";
+  const busy =
+    status === "live" || status === "connecting" || status === "downloading";
 
   // Vertical layout: a few big marquee lines. Horizontal layout: each pane is
   // tall and narrow, so fill the height with many smaller lines (CSS clips the
@@ -119,6 +121,12 @@ export default function Home() {
         </Link>
       </div>
 
+      {status === "downloading" && (
+        <div className="errorbar" style={{ background: "#1e3a5f" }}>
+          ⬇ 首次使用，正在下載地端模型（語音辨識／翻譯，約數 GB，只需下載一次）…
+          詳細進度可在後端終端機查看
+        </div>
+      )}
       {error && <div className="errorbar">{error}</div>}
     </main>
   );

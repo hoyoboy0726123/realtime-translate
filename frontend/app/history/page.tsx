@@ -111,7 +111,14 @@ export default function HistoryPage() {
       <div className="page">
         <h1>{detail.name}</h1>
         <p className="sub">
-          <button onClick={() => setDetail(null)}>← 返回列表</button>
+          <button
+            onClick={() => {
+              setDetail(null);
+              refresh(); // re-fetch so the list shows up-to-date analysis status
+            }}
+          >
+            ← 返回列表
+          </button>
           <span style={{ marginLeft: 12 }}>
             {detail.engine} · {detail.lang_a}/{detail.lang_b} ·{" "}
             {fmt(detail.started_at)}

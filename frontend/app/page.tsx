@@ -114,6 +114,9 @@ export default function Home() {
         <Link className="navlink" href="/history">
           翻譯記錄
         </Link>
+        <Link className="navlink" href="/transcribe">
+          檔案轉錄
+        </Link>
       </div>
 
       {error && <div className="errorbar">{error}</div>}

@@ -49,7 +49,12 @@ def _fw_name(model: str) -> str:
 
 
 def transcribe(samples: np.ndarray, model: str, language: str | None = None) -> dict:
-    """Transcribe float32 16 kHz mono audio. Returns {text, language}.
+    """Transcribe float32 16 kHz mono audio.
+
+    Returns {text, language, segments}, where `segments` is a list of
+    {start, end, text} — Whisper's own sentence-level breaks, with `start`/`end`
+    in seconds relative to `samples`. Callers that only need the full text can
+    ignore `segments`.
 
     Blocking / compute-bound.
     """
@@ -62,6 +67,11 @@ def transcribe(samples: np.ndarray, model: str, language: str | None = None) -> 
             condition_on_previous_text=False,
         )
         text, lang = r.get("text", "").strip(), r.get("language", "")
+        segments = [
+            {"start": float(s["start"]), "end": float(s["end"]),
+             "text": s["text"].strip()}
+            for s in r.get("segments", [])
+        ]
     else:
         # faster-whisper (CTranslate2)
         from faster_whisper import WhisperModel
@@ -69,13 +79,18 @@ def transcribe(samples: np.ndarray, model: str, language: str | None = None) -> 
         if name not in _fw_models:
             logging.info(f"[asr] loading faster-whisper model: {name}")
             _fw_models[name] = WhisperModel(name, device="auto", compute_type="auto")
-        segments, info = _fw_models[name].transcribe(
+        seg_iter, info = _fw_models[name].transcribe(
             samples, language=language, condition_on_previous_text=False,
         )
-        text, lang = "".join(seg.text for seg in segments).strip(), info.language
+        seg_list = list(seg_iter)  # the generator is single-pass — materialise it
+        text, lang = "".join(s.text for s in seg_list).strip(), info.language
+        segments = [
+            {"start": float(s.start), "end": float(s.end), "text": s.text.strip()}
+            for s in seg_list
+        ]
 
     # Safety net: Whisper can still hallucinate a repetition loop ("書書書…",
     # "and a, and a, …") on silence or noise — drop a degenerate transcript.
     if is_degenerate(text):
-        return {"text": "", "language": lang}
-    return {"text": text, "language": lang}
+        return {"text": "", "language": lang, "segments": []}
+    return {"text": text, "language": lang, "segments": segments}

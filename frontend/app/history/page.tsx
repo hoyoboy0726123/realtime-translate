@@ -53,7 +53,8 @@ export default function HistoryPage() {
   const refresh = () => {
     getTranscripts()
       .then((s) => {
-        setSessions(s);
+        // Uploaded files live on their own page (/transcribe).
+        setSessions(s.filter((x) => x.engine !== "upload"));
         setLoading(false);
       })
       .catch((e) => {
@@ -202,6 +203,22 @@ export default function HistoryPage() {
         {detail.diarized.length > 0 && (
           <div className="card">
             <h2 style={{ marginTop: 0 }}>逐句記錄（含講者）</h2>
+            <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+              {[
+                { track: "both", label: "匯出 SRT（雙語）" },
+                { track: "a", label: `匯出 SRT（${detail.lang_a}）` },
+                { track: "b", label: `匯出 SRT（${detail.lang_b}）` },
+              ].map((o) => (
+                <a
+                  key={o.track}
+                  href={`${API_BASE}/api/transcripts/${detail.id}/export.srt?track=${o.track}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <button>{o.label}</button>
+                </a>
+              ))}
+            </div>
             {detail.diarized.map((d) => (
               <div key={d.idx} className="seg">
                 <div className="seg-ts">
@@ -268,6 +285,9 @@ export default function HistoryPage() {
         所有即時翻譯都會被保存，方便日後製作摘要或會議記錄。
         <Link className="navlink" href="/" style={{ marginLeft: 12 }}>
           ← 回到即時翻譯
+        </Link>
+        <Link className="navlink" href="/transcribe" style={{ marginLeft: 8 }}>
+          檔案轉錄
         </Link>
       </p>
 

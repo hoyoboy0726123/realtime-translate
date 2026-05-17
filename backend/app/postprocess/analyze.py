@@ -19,8 +19,15 @@ from .summarize import summarize
 from .translate import translate_utterances
 
 
-def analyze_session(session_id: str) -> None:
-    """Run the full analysis pipeline for one recorded session."""
+def analyze_session(session_id: str, stage: str = "summary") -> None:
+    """Run the analysis pipeline for one recorded or uploaded session.
+
+    `stage` controls how far the pipeline runs — each stage is usable on its
+    own, so a caller need not run the whole thing:
+      "transcript" — diarize + transcribe + translate, then stop.
+      "summary"    — also produce the LLM summary. If a transcript already
+                     exists for this session, only the summary step runs.
+    """
     session = db.get_session(session_id)
     if session is None or not session.get("audio_path"):
         logging.error(f"[analyze] {session_id}: no recording to analyse")
@@ -32,23 +39,36 @@ def analyze_session(session_id: str) -> None:
     local = settings.local
 
     try:
-        # 1. diarize + transcribe (full large-v3 — offline, accuracy over speed)
-        db.set_process_status(session_id, "diarizing")
-        utterances = diarize_and_transcribe(
-            session["audio_path"], local.analyze_whisper_model,
-        )
-        if not utterances:
-            logging.error(f"[analyze] {session_id}: nothing transcribed")
-            db.set_process_status(session_id, "failed")
-            return
+        diarized = session.get("diarized") or []
 
-        # 2. translate into both locked languages
-        db.set_process_status(session_id, "translating")
-        diarized = translate_utterances(
-            utterances, lang_a, lang_b,
-            local.translate_model, settings.chinese_variant,
-        )
-        db.save_diarized(session_id, diarized)
+        # 1+2. diarize + transcribe + translate — unless a transcript already
+        # exists and we were only asked for the summary.
+        if not (stage == "summary" and diarized):
+            # 1. diarize + transcribe (full large-v3 — accuracy over speed)
+            db.set_process_status(session_id, "diarizing")
+            utterances = diarize_and_transcribe(
+                session["audio_path"], local.analyze_whisper_model,
+            )
+            if not utterances:
+                logging.error(f"[analyze] {session_id}: nothing transcribed")
+                db.set_process_status(session_id, "failed")
+                return
+
+            # 2. translate into both locked languages
+            db.set_process_status(session_id, "translating")
+            diarized = translate_utterances(
+                utterances, lang_a, lang_b,
+                local.translate_model, settings.chinese_variant,
+            )
+            db.save_diarized(session_id, diarized)
+
+            if stage == "transcript":
+                db.set_process_status(session_id, "done")
+                logging.info(
+                    f"[analyze] {session_id}: transcript done "
+                    f"({len(diarized)} utterances)"
+                )
+                return
 
         # 3. summarize — feed the lang_a column to the LLM
         db.set_process_status(session_id, "summarizing")

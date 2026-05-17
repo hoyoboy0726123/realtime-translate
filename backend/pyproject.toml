@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "pydantic>=2.7",
     "numpy>=1.26,<2",
+    "python-multipart>=0.0.9",
 ]
 
 # Dependencies for the on-device engine + post-session analysis. Pick the

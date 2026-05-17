@@ -5,12 +5,16 @@ import asyncio
 import datetime as dt
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 from concurrent.futures import ProcessPoolExecutor
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import db
+from ..config import RECORDINGS_DIR, SAMPLE_RATE
 from ..postprocess.analyze import analyze_session
 
 router = APIRouter(prefix="/api/transcripts", tags=["transcripts"])
@@ -53,8 +57,43 @@ def _on_analyze_done(session_id: str, future) -> None:
         _analyze_pool = None  # a crashed worker breaks the whole pool
 
 
+def _start_analysis(session_id: str, stage: str = "summary") -> None:
+    """Kick off the analysis pipeline in the worker process (fire-and-forget).
+
+    Must be called from within the running event loop."""
+    future = asyncio.get_running_loop().run_in_executor(
+        _pool(), analyze_session, session_id, stage,
+    )
+    future.add_done_callback(lambda f: _on_analyze_done(session_id, f))
+
+
 def _fmt_ts(ms: int) -> str:
     return dt.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _srt_ts(ms: int) -> str:
+    """Format milliseconds as an SRT timestamp: HH:MM:SS,mmm."""
+    ms = max(0, int(ms))
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _decode_to_wav(src_path: str, dst_path: str) -> tuple[bool, str]:
+    """Decode any ffmpeg-readable media file to 16 kHz mono PCM16 WAV.
+
+    Returns (ok, error_message). Blocking — call via asyncio.to_thread."""
+    proc = subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", "-i", src_path,
+         "-vn", "-ar", str(SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le",
+         dst_path],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        return False, (tail[-1] if tail else "ffmpeg failed")
+    return True, ""
 
 
 @router.get("")
@@ -84,12 +123,17 @@ async def get_audio(session_id: str):
 
 
 @router.post("/{session_id}/analyze")
-async def analyze(session_id: str) -> dict:
-    """Start post-session analysis (diarization + translation + summary).
+async def analyze(session_id: str, stage: str = "summary") -> dict:
+    """Start post-session analysis. Each stage is usable on its own:
+
+      stage=transcript — diarization + transcription + translation only.
+      stage=summary    — also the LLM summary; reuses an existing transcript.
 
     Runs in the background; poll GET /{session_id} for `process_status` —
     `diarizing` -> `translating` -> `summarizing` -> `done` (or `failed`).
     """
+    if stage not in ("transcript", "summary"):
+        stage = "summary"
     session = await asyncio.to_thread(db.get_session, session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
@@ -99,15 +143,50 @@ async def analyze(session_id: str) -> dict:
     if session.get("process_status") in _PROCESSING:
         return {"status": session["process_status"]}
 
-    await asyncio.to_thread(db.set_process_status, session_id, "diarizing")
+    # If we only need the summary and a transcript already exists, the run
+    # skips straight to the summary step — reflect that in the initial status.
+    has_transcript = bool(session.get("diarized"))
+    initial = "summarizing" if (stage == "summary" and has_transcript) else "diarizing"
+    await asyncio.to_thread(db.set_process_status, session_id, initial)
     # Run the heavy pipeline in a separate process — the backend stays
-    # responsive while it runs. We don't await the future, but we do attach a
-    # done-callback so a worker crash still flips the session to `failed`.
-    future = asyncio.get_running_loop().run_in_executor(
-        _pool(), analyze_session, session_id,
-    )
-    future.add_done_callback(lambda f: _on_analyze_done(session_id, f))
-    return {"status": "diarizing"}
+    # responsive while it runs.
+    _start_analysis(session_id, stage)
+    return {"status": initial}
+
+
+@router.post("/upload")
+async def upload_media(file: UploadFile = File(...)) -> dict:
+    """Upload an arbitrary audio/video file and decode it into a session.
+
+    Any ffmpeg-readable format works (mp3, m4a, wav, flac, mp4, mov, mkv …).
+    The file becomes a session but is *not* analysed yet — the caller chooses
+    which stage to run via POST /{session_id}/analyze?stage=...
+    """
+    name = (file.filename or "uploaded-file").strip() or "uploaded-file"
+    session_id = db.create_session(name, "upload", "zh", "en")
+    db.end_session(session_id)
+    out_path = RECORDINGS_DIR / f"{session_id}.wav"
+
+    # Spool the upload to a temp file, then let ffmpeg decode it.
+    suffix = os.path.splitext(name)[1] or ".bin"
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp_path = tmp.name
+            await asyncio.to_thread(shutil.copyfileobj, file.file, tmp)
+        ok, err = await asyncio.to_thread(_decode_to_wav, tmp_path, str(out_path))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    if not ok:
+        await asyncio.to_thread(db.delete_session, session_id)
+        if out_path.exists():
+            out_path.unlink()
+        raise HTTPException(400, f"無法解析此檔案（需為音訊或影片）：{err}")
+
+    await asyncio.to_thread(db.set_audio_path, session_id, str(out_path))
+    return {"session_id": session_id, "status": "ready"}
 
 
 @router.get("/{session_id}/export.md", response_class=PlainTextResponse)
@@ -141,6 +220,50 @@ async def export_json(session_id: str) -> dict:
     if session is None:
         raise HTTPException(404, "Session not found")
     return session
+
+
+@router.get("/{session_id}/export.srt", response_class=PlainTextResponse)
+async def export_srt(session_id: str, track: str = "both") -> PlainTextResponse:
+    """SRT subtitle export of the analysed (diarized) transcript.
+
+    `track`: `both` (lang_a then lang_b stacked), `a`, or `b`.
+    Requires the session to have been analysed first.
+    """
+    session = await asyncio.to_thread(db.get_session, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    diar = session.get("diarized") or []
+    if not diar:
+        raise HTTPException(400, "尚未分析此記錄，無法匯出 SRT")
+    if track not in ("both", "a", "b"):
+        track = "both"
+
+    cues: list[str] = []
+    for d in diar:
+        if track == "a":
+            lines = [d["text_a"]]
+        elif track == "b":
+            lines = [d["text_b"]]
+        else:
+            lines = [d["text_a"], d["text_b"]]
+        lines = [ln.strip() for ln in lines if ln and ln.strip()]
+        if not lines:
+            continue
+        start, end = d["start_ms"], d["end_ms"]
+        if end <= start:
+            end = start + 1500  # ensure a visible, non-zero cue duration
+        cues.append(
+            f"{len(cues) + 1}\n"
+            f"{_srt_ts(start)} --> {_srt_ts(end)}\n"
+            + "\n".join(lines)
+        )
+
+    body = "\n\n".join(cues) + "\n" if cues else ""
+    return PlainTextResponse(
+        body,
+        media_type="application/x-subrip",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.srt"'},
+    )
 
 
 @router.delete("/{session_id}")

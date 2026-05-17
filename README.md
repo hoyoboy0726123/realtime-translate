@@ -65,6 +65,7 @@ The local engine and recording analysis use a **dual backend**, auto-detected:
 | -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Python         | **3.10 or 3.11**   | **Do NOT use 3.12+** — the local engine's `torch 2.2` has no 3.12 wheels. Create the virtualenv with **Python 3.11**. |
 | Node.js        | **20 or newer**    | frontend build / dev server                                                                                    |
+| **ffmpeg**     | any recent build   | required to decode uploaded audio/video files on the *File transcription* page (`brew install ffmpeg` / `winget install ffmpeg`) |
 | `torch`        | pinned **2.2.x**   | do not bump — `transformers 4.44` and NLLB depend on it                                                        |
 | `transformers` | pinned **4.44.x**  | do not bump — newer releases require torch ≥ 2.4                                                               |
 
@@ -362,6 +363,7 @@ realtime-translate/
 | -------------- | ------------------ | ------------------------------------------------------------------------------------------ |
 | Python         | **3.10 或 3.11**   | **請勿用 3.12 以上** —— 地端引擎的 `torch 2.2` 沒有 3.12 的 wheel。建立虛擬環境請用 **Python 3.11**。 |
 | Node.js        | **20 以上**        | 前端建置 / 開發伺服器                                                                      |
+| **ffmpeg**     | 任意較新版本       | 「檔案轉錄」頁解碼上傳的音訊／影片檔所需（`brew install ffmpeg` /`winget install ffmpeg`） |
 | `torch`        | 鎖定 **2.2.x**     | 請勿升級 —— `transformers 4.44` 與 NLLB 依賴它                                              |
 | `transformers` | 鎖定 **4.44.x**    | 請勿升級 —— 更新版需要 torch ≥ 2.4                                                          |
 

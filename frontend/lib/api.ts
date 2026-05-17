@@ -100,12 +100,38 @@ export async function deleteTranscript(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/transcripts/${id}`, { method: "DELETE" });
 }
 
-export async function analyzeTranscript(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/transcripts/${id}/analyze`, {
+// stage "transcript" runs diarization + translation only; "summary" also
+// produces the LLM summary (reusing an existing transcript if there is one).
+export type AnalyzeStage = "transcript" | "summary";
+
+export async function analyzeTranscript(
+  id: string,
+  stage: AnalyzeStage = "summary",
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/transcripts/${id}/analyze?stage=${stage}`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
+}
+
+// Upload an arbitrary audio/video file; it becomes a session and is analysed
+// with the same diarize -> translate -> summarize pipeline as a recording.
+export async function uploadMedia(
+  file: File,
+): Promise<{ session_id: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/transcripts/upload`, {
     method: "POST",
+    body: form,
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail.detail || `${res.status} ${res.statusText}`);
   }
+  return res.json();
 }

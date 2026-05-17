@@ -100,14 +100,37 @@ def diarize_and_transcribe(wav_path: str, whisper_model: str) -> list[dict]:
         except Exception as exc:  # noqa: BLE001
             logging.error(f"[diarize] transcribe failed for a turn: {exc}")
             continue
-        text = tr["text"]
-        if not text:
+        if not tr["text"]:
             continue
-        utterances.append({
-            "speaker": f"Speaker {turn['speaker'] + 1}",
-            "start_ms": int(turn["start"] * 1000),
-            "end_ms": int(turn["end"] * 1000),
-            "text": text,
-            "lang": tr["language"],
-        })
+
+        speaker = f"Speaker {turn['speaker'] + 1}"
+        lang = tr["language"]
+        # Emit one utterance per Whisper sentence segment so a long turn
+        # becomes several timestamped lines instead of one wall of text.
+        # Segment times are relative to the clip — offset by the turn start.
+        segs = tr.get("segments") or []
+        if segs:
+            for s in segs:
+                text = s["text"].strip()
+                if not text:
+                    continue
+                start = turn["start"] + s["start"]
+                end = min(turn["start"] + s["end"], turn["end"])
+                if end <= start:
+                    end = start + _MIN_SEG_SEC
+                utterances.append({
+                    "speaker": speaker,
+                    "start_ms": int(start * 1000),
+                    "end_ms": int(end * 1000),
+                    "text": text,
+                    "lang": lang,
+                })
+        else:
+            utterances.append({
+                "speaker": speaker,
+                "start_ms": int(turn["start"] * 1000),
+                "end_ms": int(turn["end"] * 1000),
+                "text": tr["text"],
+                "lang": lang,
+            })
     return utterances

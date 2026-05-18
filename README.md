@@ -255,8 +255,27 @@ the `cu124` wheel shown below. In short: **use the `cu124` wheel on any CUDA
    between vertical and horizontal layout.
 5. Open **翻譯記錄 / History** to browse past sessions, export Markdown / JSON,
    and **分析錄音 / Analyze recording** (speaker-labelled transcript + summary).
+6. Open **檔案轉錄 / File transcription** to transcribe any audio or video file,
+   or any of the app's own recordings — see below.
 
 > The browser microphone only works on `localhost` or over HTTPS.
+
+### File transcription page
+
+The **檔案轉錄 / File transcription** tab analyses media independently of live
+translation. Upload any ffmpeg-readable file (mp3, m4a, wav, flac, mp4, mov,
+mkv …) or pick one of the project's existing recordings, then run the stages
+you want — each is optional and runs on its own:
+
+- **Transcribe + translate** — speaker-attributed, bilingual transcript.
+  Speaker identification is an opt-in checkbox (off = transcribe only, faster).
+- **Summary** — a local-LLM meeting summary, in **simple** or **detailed** mode
+  (detailed quotes speakers verbatim); long transcripts are summarised in
+  chunks. Re-uses an existing transcript instead of redoing it.
+- **Exports** — SRT subtitles and a plain-text transcript, each in bilingual /
+  language-A / language-B; the summary as Markdown or a Word `.docx` report.
+- A running analysis can be **stopped** midway; the first run shows a
+  "downloading models" phase while the models are fetched.
 
 ### Environment variables
 
@@ -538,8 +557,23 @@ CTranslate2 只要求 ≥ 12.3，而靠 CUDA 的次版本相容性，`cu124` 的
 4. 開始說話 —— 兩個窗格即時顯示雙語字幕。用控制列按鈕切換上下／左右版面。
 5. 到 **翻譯記錄** 瀏覽歷史、匯出 Markdown / JSON，並可 **分析錄音**
    （產生帶講者標籤的逐句記錄與會議摘要）。
+6. 到 **檔案轉錄** 轉錄任意音訊／影片檔，或本 App 既有的錄音檔 —— 詳見下方。
 
 > 瀏覽器麥克風需在 `localhost` 或 HTTPS 環境下才能使用。
+
+### 檔案轉錄頁
+
+**檔案轉錄** 分頁可獨立於即時翻譯處理媒體檔。上傳任意 ffmpeg 可解碼的檔案
+（mp3、m4a、wav、flac、mp4、mov、mkv…），或挑選專案內既有的錄音檔，再依需要
+執行各階段 —— 每個階段都可選、可單獨執行：
+
+- **轉錄＋翻譯** —— 產生帶講者標籤的雙語逐句記錄。是否識別講者由勾選框決定
+  （不勾＝僅轉錄、較快）。
+- **摘要** —— 由本機 LLM 產生會議摘要，可選 **簡單** 或 **詳細**（詳細會引述
+  說話者原話）；逐字稿過長時會自動分段摘要。可重用既有逐字稿、不重跑轉錄。
+- **匯出** —— SRT 字幕與純文字逐字稿，皆有雙語／語言 A／語言 B 三種；摘要可
+  匯出 Markdown 或 Word `.docx` 報告。
+- 進行中的分析可**中途停止**；首次使用會顯示「下載模型」階段。
 
 ### 環境變數
 
